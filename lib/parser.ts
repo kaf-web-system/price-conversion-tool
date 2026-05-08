@@ -1,0 +1,139 @@
+/**
+ * 商品名パース・価格計算ロジック
+ *
+ * 想定する商品名フォーマット例:
+ *   "BELDEN 88760 XLR(メス)-TRS(ステレオフォン) 2本ペア 変換ケーブル (4m)"
+ *   "ACOUSTIC REVIVE SPC-REFERENCE-tripleC ... バナナプラグ付 スピーカーケーブル 2本セット (1.5m)"
+ *
+ * 抽出するもの:
+ *   - 長さ (m)        ... 括弧内 "(4m)" "(25cm)" 等
+ *   - 本数             ... "2本ペア" "4本セット" "8ch" 等。デフォルト1
+ *   - キーワード一致   ... ユーザが指定した正規表現にヒットしたか
+ */
+
+export type KeywordRule = {
+  id: string;
+  /** 表示名（メモ用） */
+  label: string;
+  /** 正規表現パターン（商品名にマッチさせる） */
+  pattern: string;
+  /** 1mあたりの加算額（円） */
+  cablePerMeter: number;
+  /** プラグ1個あたりの加算額（円） */
+  plugPerPiece: number;
+};
+
+export type AmazonRow = {
+  sku: string;
+  asin: string;
+  productName: string;
+  currentPrice: number;
+  status: string;
+  raw: Record<string, string>;
+};
+
+export type CalcResult = {
+  sku: string;
+  asin: string;
+  productName: string;
+  currentPrice: number;
+  newPrice: number | null;
+  diff: number | null;
+  matchedRuleLabel: string | null;
+  lengthM: number | null;
+  pieces: number | null;
+  manualReason: string | null;
+};
+
+/** "(4m)" "(25cm)" "(1.5m)" 等から長さ(m)を抽出 */
+export function extractLengthMeters(name: string): number | null {
+  // メートル表記
+  const mMatch = name.match(/[（(]\s*(\d+(?:\.\d+)?)\s*m\s*[）)]/i);
+  if (mMatch) return parseFloat(mMatch[1]);
+  // センチ表記
+  const cmMatch = name.match(/[（(]\s*(\d+(?:\.\d+)?)\s*cm\s*[）)]/i);
+  if (cmMatch) return parseFloat(cmMatch[1]) / 100;
+  // 括弧外の "1.5m" 表記もフォールバック
+  const mFallback = name.match(/(\d+(?:\.\d+)?)\s*m(?![a-zA-Z])/);
+  if (mFallback) return parseFloat(mFallback[1]);
+  return null;
+}
+
+/** "2本ペア" "4本セット" "8ch" 等から本数（プラグ個数の手がかり）を抽出 */
+export function extractPieces(name: string): number {
+  // "8ch" 等 マルチch
+  const chMatch = name.match(/(\d+)\s*ch/i);
+  if (chMatch) return parseInt(chMatch[1], 10);
+  // "2本ペア" "4本セット"
+  const honMatch = name.match(/(\d+)\s*本/);
+  if (honMatch) return parseInt(honMatch[1], 10);
+  // "ペア" 単体は2
+  if (/ペア/.test(name)) return 2;
+  // デフォルト1
+  return 1;
+}
+
+/** 1商品名に対して最初にマッチしたルールを返す（先勝ち） */
+export function matchRule(name: string, rules: KeywordRule[]): KeywordRule | null {
+  for (const rule of rules) {
+    try {
+      const re = new RegExp(rule.pattern, 'i');
+      if (re.test(name)) return rule;
+    } catch {
+      // 不正な正規表現は無視
+      continue;
+    }
+  }
+  return null;
+}
+
+/** 価格計算: 新価格 = 現在価格 + (長さ × ケーブル単価) + (本数 × プラグ単価) */
+export function calculatePrice(row: AmazonRow, rules: KeywordRule[]): CalcResult {
+  const base: CalcResult = {
+    sku: row.sku,
+    asin: row.asin,
+    productName: row.productName,
+    currentPrice: row.currentPrice,
+    newPrice: null,
+    diff: null,
+    matchedRuleLabel: null,
+    lengthM: null,
+    pieces: null,
+    manualReason: null,
+  };
+
+  if (!row.currentPrice || row.currentPrice <= 0) {
+    return { ...base, manualReason: '現在価格が不明・0円' };
+  }
+
+  const rule = matchRule(row.productName, rules);
+  if (!rule) {
+    return { ...base, manualReason: 'キーワードに一致しない' };
+  }
+
+  const lengthM = extractLengthMeters(row.productName);
+  const pieces = extractPieces(row.productName);
+
+  // 長さが取れない & ケーブル加算がある場合は手動送り
+  if (lengthM === null && rule.cablePerMeter > 0) {
+    return {
+      ...base,
+      matchedRuleLabel: rule.label,
+      pieces,
+      manualReason: '長さが商品名から読み取れない',
+    };
+  }
+
+  const cableAdd = (lengthM ?? 0) * rule.cablePerMeter;
+  const plugAdd = pieces * rule.plugPerPiece;
+  const newPrice = Math.round(row.currentPrice + cableAdd + plugAdd);
+
+  return {
+    ...base,
+    newPrice,
+    diff: newPrice - row.currentPrice,
+    matchedRuleLabel: rule.label,
+    lengthM,
+    pieces,
+  };
+}
