@@ -1,7 +1,5 @@
-'use client';
-
 import { useMemo, useState } from 'react';
-import type { CalcResult, KeywordRule } from '@/lib/parser';
+import type { CalcResult, KeywordRule } from '../lib/parser';
 
 type ApiResponse = {
   total: number;
@@ -17,7 +15,7 @@ const DEFAULT_RULES: KeywordRule[] = [
   { id: '3', label: 'CANARE L-4E6S', pattern: 'CANARE\\s*L-?4E6S', cablePerMeter: 100, plugPerPiece: 250 },
 ];
 
-export default function Page() {
+export default function App() {
   const [file, setFile] = useState<File | null>(null);
   const [rules, setRules] = useState<KeywordRule[]>(DEFAULT_RULES);
   const [activeOnly, setActiveOnly] = useState(true);
@@ -54,7 +52,7 @@ export default function Page() {
       fd.append('file', file);
       fd.append('rules', JSON.stringify(rules));
       fd.append('activeOnly', String(activeOnly));
-      const res = await fetch('/api/calc', { method: 'POST', body: fd });
+      const res = await fetch('/.netlify/functions/calc', { method: 'POST', body: fd });
       const json = await res.json();
       if (!res.ok) {
         setError(json.error ?? '不明なエラー');
@@ -277,7 +275,7 @@ function csvEscape(s: string): string {
 
 function download(filename: string, content: string) {
   // BOM付きUTF-8でExcel互換
-  const blob = new Blob(['﻿' + content], { type: 'text/csv;charset=utf-8' });
+  const blob = new Blob(['\uFEFF' + content], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
