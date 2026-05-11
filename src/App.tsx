@@ -1,7 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import type { CalcResult, KeywordRule } from '../lib/parser';
+import { calculatePrice } from '../lib/parser';
+import { parseAmazonCsv, parseRulesCsv, buildRegexFromCode } from '../lib/csv';
 
-type ApiResponse = {
+type CalcSummary = {
   total: number;
   autoCount: number;
   manualCount: number;
@@ -21,7 +23,10 @@ export default function App() {
   const [activeOnly, setActiveOnly] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [data, setData] = useState<ApiResponse | null>(null);
+  const [data, setData] = useState<CalcSummary | null>(null);
+  const [importInfo, setImportInfo] = useState<string | null>(null);
+  const [importWarnings, setImportWarnings] = useState<string[]>([]);
+  const rulesFileInputRef = useRef<HTMLInputElement>(null);
 
   const updateRule = (i: number, patch: Partial<KeywordRule>) => {
     setRules((rs) => rs.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
@@ -38,6 +43,70 @@ export default function App() {
     setRules((rs) => rs.filter((_, idx) => idx !== i));
   };
 
+  /** 表示名（型番）から正規表現を自動生成してパターン欄に反映 */
+  const autoGenRegex = (i: number) => {
+    const target = rules[i];
+    if (!target) return;
+    const code = target.label.trim();
+    if (!code) {
+      setError('表示名（型番）を先に入力してください');
+      return;
+    }
+    const pattern = buildRegexFromCode(code);
+    updateRule(i, { pattern });
+    setError(null);
+  };
+
+  /** ルール定義CSV/TXTを読み込み */
+  const onRulesFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setImportInfo(null);
+    setImportWarnings([]);
+    try {
+      const text = await readFileAsText(f);
+      const { rules: imported, warnings } = parseRulesCsv(text);
+      if (imported.length === 0) {
+        setImportInfo(`「${f.name}」からルールを読み込めませんでした`);
+        setImportWarnings(warnings);
+        return;
+      }
+      // 上書き方式（既存ルールを置き換え）。マージ希望時は後述ボタン分岐。
+      setRules(imported);
+      setImportInfo(`「${f.name}」から ${imported.length} 件のルールを読み込みました（既存ルールは置き換え）`);
+      setImportWarnings(warnings);
+    } catch (err) {
+      setImportInfo(`読み込みエラー: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      // 同じファイルを再選択できるようにリセット
+      if (rulesFileInputRef.current) rulesFileInputRef.current.value = '';
+    }
+  };
+
+  /** ルール定義CSV/TXTを読み込み（既存にマージ） */
+  const onRulesFileMerge = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setImportInfo(null);
+    setImportWarnings([]);
+    try {
+      const text = await readFileAsText(f);
+      const { rules: imported, warnings } = parseRulesCsv(text);
+      if (imported.length === 0) {
+        setImportInfo(`「${f.name}」からルールを読み込めませんでした`);
+        setImportWarnings(warnings);
+        return;
+      }
+      setRules((rs) => [...rs, ...imported]);
+      setImportInfo(`「${f.name}」から ${imported.length} 件のルールを既存に追加しました`);
+      setImportWarnings(warnings);
+    } catch (err) {
+      setImportInfo(`読み込みエラー: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      (e.target as HTMLInputElement).value = '';
+    }
+  };
+
   const onSubmit = async () => {
     if (!file) {
       setError('CSVファイルを選んでください');
@@ -48,19 +117,24 @@ export default function App() {
     setData(null);
 
     try {
-      const fd = new FormData();
-      fd.append('file', file);
-      fd.append('rules', JSON.stringify(rules));
-      fd.append('activeOnly', String(activeOnly));
-      const res = await fetch('/.netlify/functions/calc', { method: 'POST', body: fd });
-      const json = await res.json();
-      if (!res.ok) {
-        setError(json.error ?? '不明なエラー');
-      } else {
-        setData(json);
-      }
+      // ファイル → ArrayBuffer → Uint8Array
+      const buffer = await file.arrayBuffer();
+      const rows = parseAmazonCsv(new Uint8Array(buffer), { activeOnly });
+
+      // 計算
+      const results: CalcResult[] = rows.map((r) => calculatePrice(r, rules));
+      const auto = results.filter((r) => r.newPrice !== null);
+      const manual = results.filter((r) => r.newPrice === null);
+
+      setData({
+        total: rows.length,
+        autoCount: auto.length,
+        manualCount: manual.length,
+        preview: results.slice(0, 50),
+        results,
+      });
     } catch (e) {
-      setError(e instanceof Error ? e.message : '通信エラー');
+      setError(e instanceof Error ? e.message : '処理エラー');
     } finally {
       setLoading(false);
     }
@@ -96,9 +170,13 @@ export default function App() {
 
   return (
     <main style={{ maxWidth: 1100, margin: '0 auto', padding: 24, fontFamily: 'sans-serif', background: '#fff', color: '#000', minHeight: '100vh' }}>
-      <h1>Amazon価格改定ツール（プロトタイプ）</h1>
+      <h1>Amazon価格改定ツール</h1>
       <p style={{ color: '#555' }}>
         商品名のキーワード一致で「ケーブル単価×長さ＋プラグ単価×個数」を現在価格に加算します。
+        <br />
+        <span style={{ fontSize: 12, color: '#888' }}>
+          ※ CSVはブラウザ内で処理されるため、サーバーへ送信されません（大容量ファイル対応）。
+        </span>
       </p>
 
       <section style={card}>
@@ -128,10 +206,56 @@ export default function App() {
         <p style={{ color: '#666', fontSize: 13 }}>
           パターンは正規表現で書けます（例: <code>BELDEN\s*88760</code>）。先に書いたルールから順に判定し、最初にマッチしたものが採用されます。
         </p>
+
+        <div style={{ background: '#f7fbff', border: '1px solid #cfe2f3', borderRadius: 4, padding: 12, margin: '8px 0' }}>
+          <strong>ルール定義ファイルを一括インポート</strong>
+          <p style={{ fontSize: 12, color: '#555', margin: '6px 0' }}>
+            「値上げデータ.txt」のような<code>型番 単価</code>形式や、<code>型番,1m単価,プラグ単価</code>のCSV形式に対応。
+            「ケーブル」「プラグ」のセクション見出しも自動判別します。
+          </p>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <label style={btnLike}>
+              既存を置き換えてインポート
+              <input
+                ref={rulesFileInputRef}
+                type="file"
+                accept=".csv,.txt"
+                onChange={onRulesFileChange}
+                style={{ display: 'none' }}
+              />
+            </label>
+            <label style={btnLikeAlt}>
+              既存に追加（マージ）
+              <input
+                type="file"
+                accept=".csv,.txt"
+                onChange={onRulesFileMerge}
+                style={{ display: 'none' }}
+              />
+            </label>
+          </div>
+          {importInfo && (
+            <p style={{ fontSize: 12, color: '#080', margin: '8px 0 0' }}>{importInfo}</p>
+          )}
+          {importWarnings.length > 0 && (
+            <details style={{ marginTop: 6 }}>
+              <summary style={{ fontSize: 12, color: '#c80', cursor: 'pointer' }}>
+                警告 {importWarnings.length} 件
+              </summary>
+              <ul style={{ fontSize: 12, color: '#c80', margin: '6px 0 0 16px' }}>
+                {importWarnings.slice(0, 20).map((w, i) => (
+                  <li key={i}>{w}</li>
+                ))}
+                {importWarnings.length > 20 && <li>...ほか {importWarnings.length - 20} 件</li>}
+              </ul>
+            </details>
+          )}
+        </div>
+
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
           <thead>
             <tr style={{ background: '#f0f0f0' }}>
-              <th style={th}>表示名</th>
+              <th style={th}>表示名（型番）</th>
               <th style={th}>正規表現パターン</th>
               <th style={th}>1m単価（円）</th>
               <th style={th}>プラグ単価（円）</th>
@@ -149,11 +273,21 @@ export default function App() {
                   />
                 </td>
                 <td style={td}>
-                  <input
-                    style={inp}
-                    value={r.pattern}
-                    onChange={(e) => updateRule(i, { pattern: e.target.value })}
-                  />
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    <input
+                      style={inp}
+                      value={r.pattern}
+                      onChange={(e) => updateRule(i, { pattern: e.target.value })}
+                      placeholder="例: BELDEN\s*88760"
+                    />
+                    <button
+                      onClick={() => autoGenRegex(i)}
+                      title="表示名から正規表現を自動生成"
+                      style={{ whiteSpace: 'nowrap', padding: '0 8px', fontSize: 12 }}
+                    >
+                      自動生成
+                    </button>
+                  </div>
                 </td>
                 <td style={td}>
                   <input
@@ -266,6 +400,25 @@ const card: React.CSSProperties = {
 const th: React.CSSProperties = { border: '1px solid #ddd', padding: '6px 8px', textAlign: 'left' };
 const td: React.CSSProperties = { border: '1px solid #eee', padding: '4px 8px', verticalAlign: 'top' };
 const inp: React.CSSProperties = { width: '100%', padding: 6, boxSizing: 'border-box', background: '#fff', color: '#000', border: '1px solid #bbb', borderRadius: 3 };
+const btnLike: React.CSSProperties = {
+  display: 'inline-block',
+  padding: '6px 14px',
+  background: '#0070f3',
+  color: '#fff',
+  borderRadius: 4,
+  cursor: 'pointer',
+  fontSize: 13,
+};
+const btnLikeAlt: React.CSSProperties = {
+  display: 'inline-block',
+  padding: '6px 14px',
+  background: '#fff',
+  color: '#0070f3',
+  border: '1px solid #0070f3',
+  borderRadius: 4,
+  cursor: 'pointer',
+  fontSize: 13,
+};
 
 function csvEscape(s: string): string {
   if (s == null) return '';
@@ -275,11 +428,28 @@ function csvEscape(s: string): string {
 
 function download(filename: string, content: string) {
   // BOM付きUTF-8でExcel互換
-  const blob = new Blob(['\uFEFF' + content], { type: 'text/csv;charset=utf-8' });
+  const blob = new Blob(['﻿' + content], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
   a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+/** File → テキスト読込（UTF-8/Shift-JIS自動判定） */
+async function readFileAsText(file: File): Promise<string> {
+  const buf = await file.arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  // UTF-8 BOMがあればUTF-8確定
+  if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
+    return new TextDecoder('utf-8').decode(bytes.slice(3));
+  }
+  // まずUTF-8でデコードしてみて、文字化けっぽければShift-JISへ
+  try {
+    const utf8 = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    return utf8;
+  } catch {
+    return new TextDecoder('shift-jis', { fatal: false }).decode(bytes);
+  }
 }
