@@ -41,6 +41,7 @@ export type CalcResult = {
   diff: number | null;
   matchedRuleLabel: string | null;
   lengthM: number | null;
+  cablePieces: number | null;
   pieces: number | null;
   manualReason: string | null;
 };
@@ -73,6 +74,26 @@ export function extractPieces(name: string): number {
   return 1;
 }
 
+/**
+ * ケーブル本数を抽出（ケーブル単価×長さ×本数 の計算に使う）
+ * "2本ペア" → 2, "4本セット" → 4, "ペア" → 2
+ * "8ch" → 1（多芯ケーブル1本構造のため）
+ * "バイワイヤリング" → 1（特殊計算は仕様確認後に対応・Notion#7）
+ * その他 → 1
+ */
+export function extractCablePieces(name: string): number {
+  // バイワイヤリングは特殊（Notion#7 仕様確認後に実装）→ 暫定で1本扱い
+  if (/バイワイヤリング|bi[\s\-]?wir/i.test(name)) return 1;
+  // 多芯ケーブル(8ch等) は1本のケーブルに芯が入っている構造なので1本
+  if (/\d+\s*ch/i.test(name)) return 1;
+  // "N本ペア" "N本セット"
+  const honMatch = name.match(/(\d+)\s*本/);
+  if (honMatch) return parseInt(honMatch[1], 10);
+  // "ペア" 単体は2本
+  if (/ペア/.test(name)) return 2;
+  return 1;
+}
+
 /** 1商品名に対して最初にマッチしたルールを返す（先勝ち） */
 export function matchRule(name: string, rules: KeywordRule[]): KeywordRule | null {
   for (const rule of rules) {
@@ -87,7 +108,7 @@ export function matchRule(name: string, rules: KeywordRule[]): KeywordRule | nul
   return null;
 }
 
-/** 価格計算: 新価格 = 現在価格 + (長さ × ケーブル単価) + (本数 × プラグ単価) */
+/** 価格計算: 新価格 = 現在価格 + (長さ × ケーブル本数 × ケーブル単価) + (プラグ個数 × プラグ単価) */
 export function calculatePrice(row: AmazonRow, rules: KeywordRule[]): CalcResult {
   const base: CalcResult = {
     sku: row.sku,
@@ -98,6 +119,7 @@ export function calculatePrice(row: AmazonRow, rules: KeywordRule[]): CalcResult
     diff: null,
     matchedRuleLabel: null,
     lengthM: null,
+    cablePieces: null,
     pieces: null,
     manualReason: null,
   };
@@ -112,6 +134,7 @@ export function calculatePrice(row: AmazonRow, rules: KeywordRule[]): CalcResult
   }
 
   const lengthM = extractLengthMeters(row.productName);
+  const cablePieces = extractCablePieces(row.productName);
   const pieces = extractPieces(row.productName);
 
   // 長さが取れない & ケーブル加算がある場合は手動送り
@@ -119,12 +142,13 @@ export function calculatePrice(row: AmazonRow, rules: KeywordRule[]): CalcResult
     return {
       ...base,
       matchedRuleLabel: rule.label,
+      cablePieces,
       pieces,
       manualReason: '長さが商品名から読み取れない',
     };
   }
 
-  const cableAdd = (lengthM ?? 0) * rule.cablePerMeter;
+  const cableAdd = (lengthM ?? 0) * cablePieces * rule.cablePerMeter;
   const plugAdd = pieces * rule.plugPerPiece;
   const newPrice = Math.round(row.currentPrice + cableAdd + plugAdd);
 
@@ -134,6 +158,7 @@ export function calculatePrice(row: AmazonRow, rules: KeywordRule[]): CalcResult
     diff: newPrice - row.currentPrice,
     matchedRuleLabel: rule.label,
     lengthM,
+    cablePieces,
     pieces,
   };
 }

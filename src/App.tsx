@@ -172,7 +172,7 @@ export default function App() {
     <main style={{ maxWidth: 1100, margin: '0 auto', padding: 24, fontFamily: 'sans-serif', background: '#fff', color: '#000', minHeight: '100vh' }}>
       <h1>Amazon価格改定ツール</h1>
       <p style={{ color: '#555' }}>
-        商品名のキーワード一致で「ケーブル単価×長さ＋プラグ単価×個数」を現在価格に加算します。
+        商品名のキーワード一致で「ケーブル単価×長さ×本数＋プラグ単価×個数」を現在価格に加算します。
         <br />
         <span style={{ fontSize: 12, color: '#888' }}>
           ※ CSVはブラウザ内で処理されるため、サーバーへ送信されません（大容量ファイル対応）。
@@ -358,6 +358,7 @@ export default function App() {
                   <th style={th}>商品名</th>
                   <th style={th}>マッチ</th>
                   <th style={th}>長さ(m)</th>
+                  <th style={th}>本数</th>
                   <th style={th}>個数</th>
                   <th style={th}>現価格</th>
                   <th style={th}>新価格</th>
@@ -375,6 +376,7 @@ export default function App() {
                     </td>
                     <td style={td}>{r.matchedRuleLabel ?? '-'}</td>
                     <td style={td}>{r.lengthM ?? '-'}</td>
+                    <td style={td}>{r.cablePieces ?? '-'}</td>
                     <td style={td}>{r.pieces ?? '-'}</td>
                     <td style={td}>{r.currentPrice.toLocaleString()}</td>
                     <td style={td}>{r.newPrice !== null ? r.newPrice.toLocaleString() : '-'}</td>
