@@ -128,6 +128,11 @@ export function calculatePrice(row: AmazonRow, rules: KeywordRule[]): CalcResult
     return { ...base, manualReason: '現在価格が不明・0円' };
   }
 
+  // バイワイヤリング商品は特殊計算（2+4の×6、バナナはペアで×12、プラグ違いはa×2+b×4）が必要なため手動対応に回す
+  if (/バイワイヤリング|バイワイ|bi[\s\-]?wir/i.test(row.productName)) {
+    return { ...base, manualReason: 'バイワイヤリング（特殊計算のため手動対応）' };
+  }
+
   const rule = matchRule(row.productName, rules);
   if (!rule) {
     return { ...base, manualReason: 'キーワードに一致しない' };
