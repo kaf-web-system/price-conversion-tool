@@ -154,6 +154,13 @@ export function parseRulesCsv(text: string): RuleImportResult {
       fields = parseCsvLine(line);
     } else {
       fields = line.split(/\s+/);
+      // スペース区切りで型番にスペースが入る場合（例：「PROFI NF2C-B/2 800」）に対応：
+      // 最後のフィールドが純粋な数値なら、それを単価、それ以外を型番として連結する
+      if (fields.length >= 3 && /^\d+(?:\.\d+)?$/.test(fields[fields.length - 1])) {
+        const price = fields[fields.length - 1];
+        const code = fields.slice(0, -1).join(' ');
+        fields = [code, price];
+      }
     }
 
     if (fields.length === 0) continue;
