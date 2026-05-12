@@ -185,8 +185,13 @@ export function calculatePrice(row: AmazonRow, rules: KeywordRule[]): CalcResult
   const plugAdd = plugRule ? pieces * plugRule.plugPerPiece : 0;
   const newPrice = Math.round(row.currentPrice + cableAdd + plugAdd);
 
-  // マッチラベル：cable + plug の両方マッチを表示
-  const matchedLabel = [cableRule?.label, plugRule?.label].filter(Boolean).join(' + ');
+  // マッチラベル：cable と plug が同一ルール（4列形式で1ルールに両方の単価が入っているケース）の場合は1つだけ表示
+  let matchedLabel: string;
+  if (cableRule && plugRule && cableRule.id === plugRule.id) {
+    matchedLabel = cableRule.label;
+  } else {
+    matchedLabel = [cableRule?.label, plugRule?.label].filter(Boolean).join(' + ');
+  }
 
   return {
     ...base,
