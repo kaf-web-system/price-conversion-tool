@@ -202,10 +202,13 @@ export default function App() {
     return data.results;
   }, [data, previewFilter]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredResults.length / pageSize));
+  // pageSize === 0 は「全件」表示のセンチネル値
+  const showAll = pageSize === 0;
+  const totalPages = showAll ? 1 : Math.max(1, Math.ceil(filteredResults.length / pageSize));
   const currentPage = Math.min(Math.max(1, page), totalPages);
-  const pageStart = (currentPage - 1) * pageSize;
-  const pageRows = filteredResults.slice(pageStart, pageStart + pageSize);
+  const pageStart = showAll ? 0 : (currentPage - 1) * pageSize;
+  const pageRows = showAll ? filteredResults : filteredResults.slice(pageStart, pageStart + pageSize);
+  const pageEnd = showAll ? filteredResults.length : Math.min(pageStart + pageSize, filteredResults.length);
 
   // フィルタ・ページサイズが変わった時はページ1へ戻す
   const changeFilter = (f: 'all' | 'auto' | 'manual') => {
@@ -470,29 +473,32 @@ export default function App() {
                 <option value={100}>100</option>
                 <option value={200}>200</option>
                 <option value={500}>500</option>
+                <option value={0}>全件</option>
               </select>
-              {' '}件/ページ
+              {' '}{showAll ? '' : '件/ページ'}
             </label>
             <span style={{ color: '#666' }}>
               {filteredResults.length === 0
                 ? '0件'
-                : `${(pageStart + 1).toLocaleString()}〜${Math.min(pageStart + pageSize, filteredResults.length).toLocaleString()} / ${filteredResults.length.toLocaleString()}件`}
+                : `${(pageStart + 1).toLocaleString()}〜${pageEnd.toLocaleString()} / ${filteredResults.length.toLocaleString()}件`}
             </span>
-            <span style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-              <button onClick={() => goToPage(currentPage - 1)} disabled={currentPage <= 1}>← 前</button>
-              <input
-                type="number"
-                value={pageInput}
-                onChange={(e) => setPageInput(e.target.value)}
-                onBlur={() => goToPage(Number(pageInput) || 1)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') goToPage(Number(pageInput) || 1);
-                }}
-                style={{ width: 60, textAlign: 'center', padding: 4 }}
-              />
-              <span style={{ color: '#666' }}>/ {totalPages.toLocaleString()}</span>
-              <button onClick={() => goToPage(currentPage + 1)} disabled={currentPage >= totalPages}>次 →</button>
-            </span>
+            {!showAll && (
+              <span style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                <button onClick={() => goToPage(currentPage - 1)} disabled={currentPage <= 1}>← 前</button>
+                <input
+                  type="number"
+                  value={pageInput}
+                  onChange={(e) => setPageInput(e.target.value)}
+                  onBlur={() => goToPage(Number(pageInput) || 1)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') goToPage(Number(pageInput) || 1);
+                  }}
+                  style={{ width: 60, textAlign: 'center', padding: 4 }}
+                />
+                <span style={{ color: '#666' }}>/ {totalPages.toLocaleString()}</span>
+                <button onClick={() => goToPage(currentPage + 1)} disabled={currentPage >= totalPages}>次 →</button>
+              </span>
+            )}
           </div>
 
           <h3 style={{ marginBottom: 6 }}>
