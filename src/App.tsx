@@ -11,6 +11,9 @@ type CalcSummary = {
   results: CalcResult[];
 };
 
+/** プラットフォーム切替（将来のShopify対応のための土台） */
+type Platform = 'amazon' | 'shopify';
+
 const DEFAULT_RULES: KeywordRule[] = [
   { id: '1', label: 'BELDEN 88760', pattern: 'BELDEN\\s*88760', cablePerMeter: 200, plugPerPiece: 300 },
   { id: '2', label: 'MOGAMI 2534', pattern: 'MOGAMI\\s*2534', cablePerMeter: 150, plugPerPiece: 300 },
@@ -18,6 +21,7 @@ const DEFAULT_RULES: KeywordRule[] = [
 ];
 
 export default function App() {
+  const [platform, setPlatform] = useState<Platform>('amazon');
   const [file, setFile] = useState<File | null>(null);
   const [rules, setRules] = useState<KeywordRule[]>(DEFAULT_RULES);
   const [activeOnly, setActiveOnly] = useState(true);
@@ -27,6 +31,12 @@ export default function App() {
   const [importInfo, setImportInfo] = useState<string | null>(null);
   const [importWarnings, setImportWarnings] = useState<string[]>([]);
   const rulesFileInputRef = useRef<HTMLInputElement>(null);
+
+  // プレビューのフィルタ・ページング状態（差分プレビュー機能）
+  const [previewFilter, setPreviewFilter] = useState<'all' | 'auto' | 'manual'>('auto');
+  const [pageSize, setPageSize] = useState<number>(100);
+  const [page, setPage] = useState<number>(1);
+  const [pageInput, setPageInput] = useState<string>('1');
 
   const updateRule = (i: number, patch: Partial<KeywordRule>) => {
     setRules((rs) => rs.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
@@ -168,9 +178,69 @@ export default function App() {
     return { rate };
   }, [data]);
 
+  // フィルタ済みプレビューリスト
+  const filteredResults = useMemo(() => {
+    if (!data) return [] as CalcResult[];
+    if (previewFilter === 'auto') return data.results.filter((r) => r.newPrice !== null);
+    if (previewFilter === 'manual') return data.results.filter((r) => r.newPrice === null);
+    return data.results;
+  }, [data, previewFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredResults.length / pageSize));
+  const currentPage = Math.min(Math.max(1, page), totalPages);
+  const pageStart = (currentPage - 1) * pageSize;
+  const pageRows = filteredResults.slice(pageStart, pageStart + pageSize);
+
+  // フィルタ・ページサイズが変わった時はページ1へ戻す
+  const changeFilter = (f: 'all' | 'auto' | 'manual') => {
+    setPreviewFilter(f);
+    setPage(1);
+    setPageInput('1');
+  };
+  const changePageSize = (n: number) => {
+    setPageSize(n);
+    setPage(1);
+    setPageInput('1');
+  };
+  const goToPage = (n: number) => {
+    const clamped = Math.min(Math.max(1, n), totalPages);
+    setPage(clamped);
+    setPageInput(String(clamped));
+  };
+
   return (
     <main style={{ maxWidth: 1100, margin: '0 auto', padding: 24, fontFamily: 'sans-serif', background: '#fff', color: '#000', minHeight: '100vh' }}>
-      <h1>Amazon価格改定ツール</h1>
+      <h1>価格改定ツール</h1>
+
+      {/* プラットフォーム切替タブ（土台のみ・Shopifyは準備中） */}
+      <div style={{ display: 'flex', gap: 4, borderBottom: '2px solid #ddd', marginBottom: 16, flexWrap: 'wrap' }}>
+        <button
+          onClick={() => setPlatform('amazon')}
+          style={platform === 'amazon' ? tabActive : tabInactive}
+        >
+          Amazon
+        </button>
+        <button
+          onClick={() => setPlatform('shopify')}
+          style={platform === 'shopify' ? tabActive : tabInactive}
+        >
+          Shopify（準備中）
+        </button>
+      </div>
+
+      {platform === 'shopify' && (
+        <section style={{ ...card, background: '#fafafa' }}>
+          <h2 style={{ marginTop: 0 }}>Shopify対応は準備中です</h2>
+          <p style={{ color: '#555', fontSize: 14 }}>
+            Amazonと同じルール定義を使ってShopify側の価格も一括改定できるよう、次のフェーズで対応予定です。
+            <br />
+            画面上部の「Amazon」タブから現在の機能が利用できます。
+          </p>
+        </section>
+      )}
+
+      {platform === 'amazon' && (
+      <>
       <p style={{ color: '#555' }}>
         商品名のキーワード一致で「ケーブル単価×長さ×本数＋プラグ単価×個数」を現在価格に加算します。
         <br />
@@ -345,49 +415,124 @@ export default function App() {
             手動対応: <b style={{ color: '#c80' }}>{data.manualCount.toLocaleString()}</b> 件
             （自動率 {stats?.rate}%）
           </p>
-          <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
-            <button onClick={downloadAuto}>自動改定CSVをダウンロード</button>
-            <button onClick={downloadManual}>手動対応リストCSVをダウンロード</button>
+          <div style={{ display: 'flex', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
+            <button onClick={downloadAuto}>自動改定CSV（Amazon仕様）</button>
+            <button onClick={downloadManual}>手動対応リストCSV</button>
           </div>
-          <h3>プレビュー（先頭50件）</h3>
-          <div style={{ overflow: 'auto', maxHeight: 500, border: '1px solid #ddd' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+
+          {/* フィルタタブ */}
+          <div style={{ display: 'flex', gap: 4, marginTop: 8, flexWrap: 'wrap' }}>
+            <button
+              onClick={() => changeFilter('all')}
+              style={previewFilter === 'all' ? filterTabActive : filterTabInactive}
+            >
+              全件（{data.total.toLocaleString()}件）
+            </button>
+            <button
+              onClick={() => changeFilter('auto')}
+              style={previewFilter === 'auto' ? filterTabActive : filterTabInactive}
+            >
+              自動改定対象のみ（{data.autoCount.toLocaleString()}件）
+            </button>
+            <button
+              onClick={() => changeFilter('manual')}
+              style={previewFilter === 'manual' ? filterTabActive : filterTabInactive}
+            >
+              手動対応のみ（{data.manualCount.toLocaleString()}件）
+            </button>
+          </div>
+
+          {/* ページサイズ・ページャ */}
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center', margin: '12px 0', flexWrap: 'wrap', fontSize: 13 }}>
+            <label>
+              表示件数:{' '}
+              <select value={pageSize} onChange={(e) => changePageSize(Number(e.target.value))}>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+                <option value={200}>200</option>
+                <option value={500}>500</option>
+              </select>
+              {' '}件/ページ
+            </label>
+            <span style={{ color: '#666' }}>
+              {filteredResults.length === 0
+                ? '0件'
+                : `${(pageStart + 1).toLocaleString()}〜${Math.min(pageStart + pageSize, filteredResults.length).toLocaleString()} / ${filteredResults.length.toLocaleString()}件`}
+            </span>
+            <span style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+              <button onClick={() => goToPage(currentPage - 1)} disabled={currentPage <= 1}>← 前</button>
+              <input
+                type="number"
+                value={pageInput}
+                onChange={(e) => setPageInput(e.target.value)}
+                onBlur={() => goToPage(Number(pageInput) || 1)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') goToPage(Number(pageInput) || 1);
+                }}
+                style={{ width: 60, textAlign: 'center', padding: 4 }}
+              />
+              <span style={{ color: '#666' }}>/ {totalPages.toLocaleString()}</span>
+              <button onClick={() => goToPage(currentPage + 1)} disabled={currentPage >= totalPages}>次 →</button>
+            </span>
+          </div>
+
+          <h3 style={{ marginBottom: 6 }}>
+            プレビュー（{previewFilter === 'all' ? '全件' : previewFilter === 'auto' ? '自動改定対象のみ' : '手動対応のみ'}）
+          </h3>
+          <div style={{ overflow: 'auto', maxHeight: 600, border: '1px solid #ddd' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 900 }}>
               <thead>
                 <tr style={{ background: '#f0f0f0', position: 'sticky', top: 0 }}>
                   <th style={th}>SKU</th>
                   <th style={th}>商品名</th>
-                  <th style={th}>マッチ</th>
-                  <th style={th}>長さ(m)</th>
-                  <th style={th}>本数</th>
-                  <th style={th}>個数</th>
-                  <th style={th}>現価格</th>
-                  <th style={th}>新価格</th>
-                  <th style={th}>差額</th>
-                  <th style={th}>手動理由</th>
+                  <th style={{ ...th, textAlign: 'right' }}>現価格</th>
+                  <th style={{ ...th, textAlign: 'right' }}>改定後価格</th>
+                  <th style={{ ...th, textAlign: 'right' }}>差額</th>
+                  <th style={th}>マッチしたルール / 手動対応理由</th>
                 </tr>
               </thead>
               <tbody>
-                {data.preview.map((r, i) => (
-                  <tr key={i} style={{ background: r.newPrice === null ? '#fff8e1' : 'transparent' }}>
-                    <td style={td}>{r.sku}</td>
-                    <td style={td} title={r.productName}>
-                      {r.productName.slice(0, 40)}
-                      {r.productName.length > 40 ? '…' : ''}
+                {pageRows.map((r, i) => {
+                  const isManual = r.newPrice === null;
+                  return (
+                    <tr key={pageStart + i} style={{ background: isManual ? '#fff8e1' : 'transparent' }}>
+                      <td style={td}>{r.sku}</td>
+                      <td style={td} title={r.productName}>
+                        {r.productName.slice(0, 50)}
+                        {r.productName.length > 50 ? '…' : ''}
+                      </td>
+                      <td style={{ ...td, textAlign: 'right' }}>{r.currentPrice.toLocaleString()}</td>
+                      <td style={{ ...td, textAlign: 'right' }}>
+                        {isManual ? '' : r.newPrice!.toLocaleString()}
+                      </td>
+                      <td style={{ ...td, textAlign: 'right', color: isManual ? '#999' : (r.diff! >= 0 ? '#080' : '#c00'), fontWeight: 600 }}>
+                        {isManual
+                          ? ''
+                          : (r.diff! >= 0 ? `+${r.diff!.toLocaleString()}` : r.diff!.toLocaleString())}
+                      </td>
+                      <td style={td}>
+                        {isManual ? (
+                          <span style={{ color: '#c80' }}>手動対応: {r.manualReason ?? '-'}</span>
+                        ) : (
+                          r.matchedRuleLabel ?? '-'
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+                {pageRows.length === 0 && (
+                  <tr>
+                    <td style={td} colSpan={6}>
+                      <span style={{ color: '#999' }}>表示できる行がありません</span>
                     </td>
-                    <td style={td}>{r.matchedRuleLabel ?? '-'}</td>
-                    <td style={td}>{r.lengthM ?? '-'}</td>
-                    <td style={td}>{r.cablePieces ?? '-'}</td>
-                    <td style={td}>{r.pieces ?? '-'}</td>
-                    <td style={td}>{r.currentPrice.toLocaleString()}</td>
-                    <td style={td}>{r.newPrice !== null ? r.newPrice.toLocaleString() : '-'}</td>
-                    <td style={td}>{r.diff !== null ? `+${r.diff.toLocaleString()}` : '-'}</td>
-                    <td style={td}>{r.manualReason ?? ''}</td>
                   </tr>
-                ))}
+                )}
               </tbody>
             </table>
           </div>
         </section>
+      )}
+      </>
       )}
     </main>
   );
@@ -420,6 +565,48 @@ const btnLikeAlt: React.CSSProperties = {
   borderRadius: 4,
   cursor: 'pointer',
   fontSize: 13,
+};
+
+const tabBase: React.CSSProperties = {
+  padding: '8px 16px',
+  fontSize: 14,
+  border: 'none',
+  borderTopLeftRadius: 6,
+  borderTopRightRadius: 6,
+  cursor: 'pointer',
+  marginBottom: -2,
+};
+const tabActive: React.CSSProperties = {
+  ...tabBase,
+  background: '#0070f3',
+  color: '#fff',
+  fontWeight: 600,
+  borderBottom: '2px solid #0070f3',
+};
+const tabInactive: React.CSSProperties = {
+  ...tabBase,
+  background: '#f0f0f0',
+  color: '#555',
+};
+
+const filterTabBase: React.CSSProperties = {
+  padding: '6px 12px',
+  fontSize: 13,
+  border: '1px solid #ccc',
+  borderRadius: 4,
+  cursor: 'pointer',
+};
+const filterTabActive: React.CSSProperties = {
+  ...filterTabBase,
+  background: '#0070f3',
+  color: '#fff',
+  borderColor: '#0070f3',
+  fontWeight: 600,
+};
+const filterTabInactive: React.CSSProperties = {
+  ...filterTabBase,
+  background: '#fff',
+  color: '#333',
 };
 
 function csvEscape(s: string): string {
