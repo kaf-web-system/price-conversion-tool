@@ -1,103 +1,14 @@
-import Papa from 'papaparse';
-import type { AmazonRow, KeywordRule } from './parser';
-
 /**
- * Amazon出品レポートCSV(CP932/UTF-8)をブラウザ内でパースして AmazonRow[] に変換
- * Active のみ対象とするオプションあり
+ * ルール定義 共通処理（プラットフォーム非依存）
  *
- * ブラウザ動作のため iconv-lite/Buffer は使わず TextDecoder('shift-jis') を利用。
- * shift-jis でデコード失敗(化け検知)の場合は UTF-8 で再試行する。
+ * - parseRulesCsv: 値上げデータCSV/TXT から KeywordRule[] へ
+ * - buildRegexFromCode: 型番文字列から正規表現パターンを自動生成
  */
-export function parseAmazonCsv(
-  buffer: ArrayBuffer | Uint8Array,
-  opts: { activeOnly?: boolean } = {}
-): AmazonRow[] {
-  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
 
-  // CP932 (shift-jis 互換) でデコード。失敗時は UTF-8 で再試行。
-  let text: string;
-  try {
-    const decoder = new TextDecoder('shift-jis', { fatal: false });
-    text = decoder.decode(bytes);
-  } catch {
-    const decoder = new TextDecoder('utf-8', { fatal: false });
-    text = decoder.decode(bytes);
-  }
+import type { KeywordRule } from './parser';
+import { parseCsvLine } from './csv-utils';
 
-  // 先頭にBOMが残っていれば除去
-  if (text.charCodeAt(0) === 0xfeff) {
-    text = text.slice(1);
-  }
-
-  const parsed = Papa.parse<Record<string, string>>(text, {
-    header: true,
-    skipEmptyLines: true,
-  });
-
-  const rows: AmazonRow[] = [];
-  for (const r of parsed.data) {
-    const sku = (r['出品者SKU'] ?? '').trim();
-    const asin = (r['ASIN 1'] ?? '').trim();
-    const name = (r['商品名'] ?? '').trim();
-    const priceStr = (r['価格'] ?? '').trim();
-    const status = (r['ステータス'] ?? '').trim();
-    if (!sku && !asin) continue;
-    if (!name) continue;
-    if (opts.activeOnly && status !== 'Active') continue;
-    const price = parseFloat(priceStr.replace(/[^\d.]/g, ''));
-    rows.push({
-      sku,
-      asin,
-      productName: name,
-      currentPrice: isNaN(price) ? 0 : price,
-      status,
-      raw: r,
-    });
-  }
-  return rows;
-}
-
-/** 自動改定用CSV: SKU,price */
-export function buildAutoCsv(results: { sku: string; newPrice: number | null }[]): string {
-  const rows = results
-    .filter((r) => r.newPrice !== null)
-    .map((r) => `${escapeCsv(r.sku)},${r.newPrice}`);
-  return ['sku,price', ...rows].join('\n');
-}
-
-/** 手動対応リスト用CSV */
-export function buildManualCsv(
-  results: {
-    sku: string;
-    asin: string;
-    productName: string;
-    currentPrice: number;
-    manualReason: string | null;
-  }[]
-): string {
-  const header = 'sku,asin,商品名,現在価格,手動対応理由';
-  const rows = results.map(
-    (r) =>
-      `${escapeCsv(r.sku)},${escapeCsv(r.asin)},${escapeCsv(r.productName)},${r.currentPrice},${escapeCsv(
-        r.manualReason ?? ''
-      )}`
-  );
-  return [header, ...rows].join('\n');
-}
-
-function escapeCsv(s: string): string {
-  if (s == null) return '';
-  if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
-  return s;
-}
-
-// ─────────────────────────────────────────────
-//  ルール定義CSV 一括インポート（こうちゃんレビュー#1）
-// ─────────────────────────────────────────────
-
-/**
- * ルール定義テキスト/CSVのパース結果
- */
+/** ルール定義テキスト/CSVのパース結果 */
 export type RuleImportResult = {
   rules: KeywordRule[];
   warnings: string[];
@@ -226,43 +137,6 @@ export function parseRulesCsv(text: string): RuleImportResult {
 
   return { rules, warnings };
 }
-
-/** 簡易CSV1行パーサ（"..." のクォート対応） */
-function parseCsvLine(line: string): string[] {
-  const result: string[] = [];
-  let cur = '';
-  let inQuote = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (inQuote) {
-      if (ch === '"') {
-        if (line[i + 1] === '"') {
-          cur += '"';
-          i++;
-        } else {
-          inQuote = false;
-        }
-      } else {
-        cur += ch;
-      }
-    } else {
-      if (ch === ',') {
-        result.push(cur.trim());
-        cur = '';
-      } else if (ch === '"') {
-        inQuote = true;
-      } else {
-        cur += ch;
-      }
-    }
-  }
-  result.push(cur.trim());
-  return result;
-}
-
-// ─────────────────────────────────────────────
-//  正規表現自動生成（こうちゃんレビュー#2）
-// ─────────────────────────────────────────────
 
 /**
  * 型番文字列から正規表現パターンを自動生成する。
