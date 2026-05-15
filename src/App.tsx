@@ -4,6 +4,7 @@ import { calculatePrice } from '../lib/parser';
 import { parseRulesCsv, buildRegexFromCode } from '../lib/rules';
 import type { PlatformAdapter } from '../lib/adapters/types';
 import { amazonAdapter } from '../lib/adapters/amazon';
+import { shopifyAdapter } from '../lib/adapters/shopify';
 
 type CalcSummary = {
   total: number;
@@ -21,10 +22,10 @@ const DEFAULT_RULES: KeywordRule[] = [
   { id: '3', label: 'CANARE L-4E6S', pattern: 'CANARE\\s*L-?4E6S', cablePerMeter: 100, plugPerPiece: 250 },
 ];
 
-/** プラットフォームIDから適切な PlatformAdapter を返す（Shopifyは PR #4 で実装予定） */
-function getAdapter(platform: Platform): PlatformAdapter | null {
-  if (platform === 'amazon') return amazonAdapter;
-  return null; // shopify: 準備中
+/** プラットフォームIDから適切な PlatformAdapter を返す */
+function getAdapter(platform: Platform): PlatformAdapter {
+  if (platform === 'shopify') return shopifyAdapter;
+  return amazonAdapter;
 }
 
 export default function App() {
@@ -130,10 +131,6 @@ export default function App() {
       return;
     }
     const adapter = getAdapter(platform);
-    if (!adapter) {
-      setError(`${platform} は準備中です`);
-      return;
-    }
     setError(null);
     setLoading(true);
     setData(null);
@@ -169,14 +166,14 @@ export default function App() {
   const downloadAuto = () => {
     if (!data) return;
     const adapter = getAdapter(platform);
-    if (!adapter) return;
-    download(`${adapter.id}_price_update.csv`, adapter.buildAutoCsv(data.results));
+    // Shopify の自動改定CSVは BOM なし（公式仕様）。Amazon と手動・詳細CSVは BOM 付き（Excel互換）。
+    const withBom = adapter.id !== 'shopify';
+    download(`${adapter.id}_price_update.csv`, adapter.buildAutoCsv(data.results), withBom);
   };
 
   const downloadManual = () => {
     if (!data) return;
     const adapter = getAdapter(platform);
-    if (!adapter) return;
     download('manual_review_list.csv', adapter.buildManualCsv(data.results));
   };
 
@@ -190,13 +187,12 @@ export default function App() {
   const downloadDetail = () => {
     if (!data) return;
     const adapter = getAdapter(platform);
-    if (!adapter) return;
     download(`${adapter.id}_price_detail.csv`, adapter.buildDetailCsv(data.results));
   };
 
   // 現在のプラットフォームに対応するラベル（SKU/ASIN等の表示名）
   const adapterLabels = useMemo(() => {
-    return getAdapter(platform)?.labels ?? { sku: 'SKU', productId: 'ASIN' };
+    return getAdapter(platform).labels;
   }, [platform]);
 
   // フィルタ済みプレビューリスト
@@ -393,18 +389,18 @@ export default function App() {
             onClick={() => setPlatform('shopify')}
             style={platform === 'shopify' ? tabActive : tabInactive}
           >
-            Shopify（準備中）
+            Shopify
           </button>
         </div>
         {platform === 'shopify' && (
-          <p style={{ color: '#555', fontSize: 14, marginTop: 12, marginBottom: 0 }}>
-            Shopify対応は準備中です。Amazonをお選びください。
+          <p style={{ color: '#555', fontSize: 12, marginTop: 12, marginBottom: 0 }}>
+            ShopifyエクスポートCSVに対応。出力CSVは Shopify 公式仕様の安全構成4列（Handle / Title / Variant SKU / Variant Price）で、UTF-8 / LF / BOM なし。
+            <br />
+            ※ Shopify インポート時は「Overwrite any current products with the same handle」チェックON必須（公式仕様）。
           </p>
         )}
       </section>
 
-      {platform === 'amazon' && (
-      <>
       <section style={card}>
         <h2>4. 実行</h2>
         <button
@@ -577,8 +573,6 @@ export default function App() {
           </div>
         </section>
       )}
-      </>
-      )}
     </main>
   );
 }
@@ -664,9 +658,11 @@ const filterTabInactive: React.CSSProperties = {
   color: '#333',
 };
 
-function download(filename: string, content: string) {
-  // BOM付きUTF-8でExcel互換
-  const blob = new Blob(['﻿' + content], { type: 'text/csv;charset=utf-8' });
+function download(filename: string, content: string, withBom: boolean = true) {
+  // withBom=true: BOM付きUTF-8（Excel互換、Amazon系の出力デフォルト）
+  // withBom=false: BOMなしUTF-8（Shopify 自動改定CSV用、公式仕様）
+  const body = withBom ? '﻿' + content : content;
+  const blob = new Blob([body], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
