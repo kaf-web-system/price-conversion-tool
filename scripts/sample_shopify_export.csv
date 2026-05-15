@@ -1,0 +1,7 @@
+Handle,Title,Body (HTML),Vendor,Type,Tags,Published,Option1 Name,Option1 Value,Variant SKU,Variant Price,Variant Compare At Price,Variant Requires Shipping,Variant Taxable,Variant Barcode,Image Src,Image Position,Image Alt Text,Gift Card,SEO Title,SEO Description,Status
+audio-cable-mogami-2534-3m,MOGAMI 2534 XLRケーブル (3m),"<p>高品質XLRケーブル</p>",ONKODO,ケーブル,"オーディオ,ケーブル",true,長さ,3m,MGM-2534-3M,8500,,,true,,,,,,false,,,active
+audio-cable-mogami-2534-3m,,,,,,,長さ,5m,MGM-2534-5M,9800,,,,,,,,,,,,
+audio-cable-belden-88760,BELDEN 88760 XLR(メス)-TSフォン 2本ペア 変換ケーブル (4m),"<p>BELDEN ケーブル</p>",ONKODO,ケーブル,オーディオ,true,,,BLD-88760-4M,12500,,,true,,,,,,false,,,active
+audio-cable-canare-l4e6s,CANARE L-4E6S スピーカーケーブル (2m),"<p>CANAREケーブル</p>",ONKODO,ケーブル,,true,,,CNR-L4E6S-2M,4800,,,true,,,,,,false,,,active
+audio-cable-test-no-length,MOGAMI 2534 RCAケーブル,"<p>長さ表記なしテスト</p>",ONKODO,ケーブル,,true,,,MGM-2534-NL,5000,,,true,,,,,,false,,,active
+audio-cable-draft,テスト用ドラフト商品,"<p>draftステータステスト</p>",,ケーブル,,false,,,DRAFT-001,1000,,,true,,,,,,false,,,draft
