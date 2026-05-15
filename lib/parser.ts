@@ -1,5 +1,5 @@
 /**
- * 商品名パース・価格計算ロジック
+ * 商品名パース・価格計算ロジック（プラットフォーム非依存）
  *
  * 想定する商品名フォーマット例:
  *   "BELDEN 88760 XLR(メス)-TRS(ステレオフォン) 2本ペア 変換ケーブル (4m)"
@@ -9,6 +9,8 @@
  *   - 長さ (m)        ... 括弧内 "(4m)" "(25cm)" 等
  *   - 本数             ... "2本ペア" "4本セット" "8ch" 等。デフォルト1
  *   - キーワード一致   ... ユーザが指定した正規表現にヒットしたか
+ *
+ * Amazon/Shopify 共通で使うため、商品識別子は `productId`（Amazon=ASIN／Shopify=Handle）。
  */
 
 export type KeywordRule = {
@@ -23,9 +25,14 @@ export type KeywordRule = {
   plugPerPiece: number;
 };
 
-export type AmazonRow = {
+/**
+ * プラットフォーム非依存の商品行（読み込み後の正規化済み形）
+ * - Amazon: sku=出品者SKU, productId=ASIN
+ * - Shopify: sku=Variant SKU, productId=Handle
+ */
+export type ProductRow = {
   sku: string;
-  asin: string;
+  productId: string;
   productName: string;
   currentPrice: number;
   status: string;
@@ -34,7 +41,7 @@ export type AmazonRow = {
 
 export type CalcResult = {
   sku: string;
-  asin: string;
+  productId: string;
   productName: string;
   currentPrice: number;
   newPrice: number | null;
@@ -134,10 +141,10 @@ export function matchCableAndPlug(name: string, rules: KeywordRule[]): {
 }
 
 /** 価格計算: 新価格 = 現在価格 + (長さ × ケーブル本数 × ケーブル単価) + (プラグ個数 × プラグ単価) */
-export function calculatePrice(row: AmazonRow, rules: KeywordRule[]): CalcResult {
+export function calculatePrice(row: ProductRow, rules: KeywordRule[]): CalcResult {
   const base: CalcResult = {
     sku: row.sku,
-    asin: row.asin,
+    productId: row.productId,
     productName: row.productName,
     currentPrice: row.currentPrice,
     newPrice: null,
