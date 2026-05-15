@@ -7,7 +7,6 @@ type CalcSummary = {
   total: number;
   autoCount: number;
   manualCount: number;
-  preview: CalcResult[];
   results: CalcResult[];
 };
 
@@ -140,9 +139,13 @@ export default function App() {
         total: rows.length,
         autoCount: auto.length,
         manualCount: manual.length,
-        preview: results.slice(0, 50),
         results,
       });
+      // 再計算時はプレビューの表示状態を初期化（page/pageInput/previewFilter）
+      // pageSize はユーザーの選択を尊重して保持
+      setPage(1);
+      setPageInput('1');
+      setPreviewFilter('auto');
     } catch (e) {
       setError(e instanceof Error ? e.message : '処理エラー');
     } finally {
@@ -487,11 +490,27 @@ export default function App() {
                 <button onClick={() => goToPage(currentPage - 1)} disabled={currentPage <= 1}>← 前</button>
                 <input
                   type="number"
+                  inputMode="numeric"
                   value={pageInput}
                   onChange={(e) => setPageInput(e.target.value)}
-                  onBlur={() => goToPage(Number(pageInput) || 1)}
+                  onBlur={() => {
+                    // 空文字・NaN・負値は現在のページに戻して正規化
+                    const n = Number(pageInput);
+                    if (!pageInput.trim() || Number.isNaN(n)) {
+                      goToPage(currentPage);
+                    } else {
+                      goToPage(n);
+                    }
+                  }}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter') goToPage(Number(pageInput) || 1);
+                    if (e.key === 'Enter') {
+                      const n = Number(pageInput);
+                      if (!pageInput.trim() || Number.isNaN(n)) {
+                        goToPage(currentPage);
+                      } else {
+                        goToPage(n);
+                      }
+                    }
                   }}
                   style={{ width: 60, textAlign: 'center', padding: 4 }}
                 />
@@ -507,13 +526,13 @@ export default function App() {
           <div style={{ overflow: 'auto', maxHeight: 600, border: '1px solid #ddd' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 900 }}>
               <thead>
-                <tr style={{ background: '#f0f0f0', position: 'sticky', top: 0 }}>
-                  <th style={th}>SKU</th>
-                  <th style={th}>商品名</th>
-                  <th style={{ ...th, textAlign: 'right' }}>現価格</th>
-                  <th style={{ ...th, textAlign: 'right' }}>改定後価格</th>
-                  <th style={{ ...th, textAlign: 'right' }}>差額</th>
-                  <th style={th}>マッチしたルール / 手動対応理由</th>
+                <tr>
+                  <th style={thSticky}>SKU</th>
+                  <th style={thSticky}>商品名</th>
+                  <th style={{ ...thSticky, textAlign: 'right' }}>現価格</th>
+                  <th style={{ ...thSticky, textAlign: 'right' }}>改定後価格</th>
+                  <th style={{ ...thSticky, textAlign: 'right' }}>差額</th>
+                  <th style={thSticky}>マッチしたルール / 手動対応理由</th>
                 </tr>
               </thead>
               <tbody>
@@ -537,7 +556,10 @@ export default function App() {
                       </td>
                       <td style={td}>
                         {isManual ? (
-                          <span style={{ color: '#c80' }}>手動対応: {r.manualReason ?? '-'}</span>
+                          <span style={{ color: '#c80' }}>
+                            手動対応: {r.manualReason ?? '-'}
+                            {r.matchedRuleLabel ? `（${r.matchedRuleLabel}）` : ''}
+                          </span>
                         ) : (
                           r.matchedRuleLabel ?? '-'
                         )}
@@ -570,6 +592,16 @@ const card: React.CSSProperties = {
   marginTop: 16,
 };
 const th: React.CSSProperties = { border: '1px solid #ddd', padding: '6px 8px', textAlign: 'left' };
+// iOS Safari 等で確実に効く sticky ヘッダ（th 自身に position:sticky を当てる）
+const thSticky: React.CSSProperties = {
+  border: '1px solid #ddd',
+  padding: '6px 8px',
+  textAlign: 'left',
+  position: 'sticky',
+  top: 0,
+  background: '#f0f0f0',
+  zIndex: 1,
+};
 const td: React.CSSProperties = { border: '1px solid #eee', padding: '4px 8px', verticalAlign: 'top' };
 const inp: React.CSSProperties = { width: '100%', padding: 6, boxSizing: 'border-box', background: '#fff', color: '#000', border: '1px solid #bbb', borderRadius: 3 };
 const btnLike: React.CSSProperties = {
