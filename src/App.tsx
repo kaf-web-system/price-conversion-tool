@@ -1,7 +1,9 @@
 import { useMemo, useRef, useState } from 'react';
 import type { CalcResult, KeywordRule } from '../lib/parser';
 import { calculatePrice } from '../lib/parser';
-import { parseAmazonCsv, parseRulesCsv, buildRegexFromCode } from '../lib/csv';
+import { parseRulesCsv, buildRegexFromCode } from '../lib/rules';
+import type { PlatformAdapter } from '../lib/adapters/types';
+import { amazonAdapter } from '../lib/adapters/amazon';
 
 type CalcSummary = {
   total: number;
@@ -18,6 +20,12 @@ const DEFAULT_RULES: KeywordRule[] = [
   { id: '2', label: 'MOGAMI 2534', pattern: 'MOGAMI\\s*2534', cablePerMeter: 150, plugPerPiece: 300 },
   { id: '3', label: 'CANARE L-4E6S', pattern: 'CANARE\\s*L-?4E6S', cablePerMeter: 100, plugPerPiece: 250 },
 ];
+
+/** プラットフォームIDから適切な PlatformAdapter を返す（Shopifyは PR #4 で実装予定） */
+function getAdapter(platform: Platform): PlatformAdapter | null {
+  if (platform === 'amazon') return amazonAdapter;
+  return null; // shopify: 準備中
+}
 
 export default function App() {
   const [platform, setPlatform] = useState<Platform>('amazon');
@@ -121,6 +129,11 @@ export default function App() {
       setError('CSVファイルを選んでください');
       return;
     }
+    const adapter = getAdapter(platform);
+    if (!adapter) {
+      setError(`${platform} は準備中です`);
+      return;
+    }
     setError(null);
     setLoading(true);
     setData(null);
@@ -128,7 +141,7 @@ export default function App() {
     try {
       // ファイル → ArrayBuffer → Uint8Array
       const buffer = await file.arrayBuffer();
-      const rows = parseAmazonCsv(new Uint8Array(buffer), { activeOnly });
+      const rows = adapter.parseCsv(new Uint8Array(buffer), { activeOnly });
 
       // 計算
       const results: CalcResult[] = rows.map((r) => calculatePrice(r, rules));
@@ -155,24 +168,16 @@ export default function App() {
 
   const downloadAuto = () => {
     if (!data) return;
-    const lines = ['sku,price'];
-    for (const r of data.results) {
-      if (r.newPrice !== null) lines.push(`${csvEscape(r.sku)},${r.newPrice}`);
-    }
-    download('amazon_price_update.csv', lines.join('\n'));
+    const adapter = getAdapter(platform);
+    if (!adapter) return;
+    download(`${adapter.id}_price_update.csv`, adapter.buildAutoCsv(data.results));
   };
 
   const downloadManual = () => {
     if (!data) return;
-    const lines = ['sku,asin,商品名,現在価格,手動対応理由'];
-    for (const r of data.results) {
-      if (r.newPrice === null) {
-        lines.push(
-          `${csvEscape(r.sku)},${csvEscape(r.asin)},${csvEscape(r.productName)},${r.currentPrice},${csvEscape(r.manualReason ?? '')}`
-        );
-      }
-    }
-    download('manual_review_list.csv', lines.join('\n'));
+    const adapter = getAdapter(platform);
+    if (!adapter) return;
+    download('manual_review_list.csv', adapter.buildManualCsv(data.results));
   };
 
   const stats = useMemo(() => {
@@ -184,18 +189,15 @@ export default function App() {
   // 詳細CSV（検証用・全カラム）ダウンロード
   const downloadDetail = () => {
     if (!data) return;
-    const lines = ['sku,商品名,現価格,改定後価格,差額,マッチしたルール,分類'];
-    for (const r of data.results) {
-      const klass = r.newPrice === null ? `手動対応: ${r.manualReason ?? ''}` : '自動改定';
-      const newP = r.newPrice !== null ? String(r.newPrice) : '';
-      const diff = r.diff !== null ? (r.diff >= 0 ? `+${r.diff}` : String(r.diff)) : '';
-      const rule = r.matchedRuleLabel ?? '';
-      lines.push(
-        `${csvEscape(r.sku)},${csvEscape(r.productName)},${r.currentPrice},${newP},${csvEscape(diff)},${csvEscape(rule)},${csvEscape(klass)}`
-      );
-    }
-    download('amazon_price_detail.csv', lines.join('\n'));
+    const adapter = getAdapter(platform);
+    if (!adapter) return;
+    download(`${adapter.id}_price_detail.csv`, adapter.buildDetailCsv(data.results));
   };
+
+  // 現在のプラットフォームに対応するラベル（SKU/ASIN等の表示名）
+  const adapterLabels = useMemo(() => {
+    return getAdapter(platform)?.labels ?? { sku: 'SKU', productId: 'ASIN' };
+  }, [platform]);
 
   // フィルタ済みプレビューリスト
   const filteredResults = useMemo(() => {
@@ -434,7 +436,7 @@ export default function App() {
             （自動率 {stats?.rate}%）
           </p>
           <div style={{ display: 'flex', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
-            <button onClick={downloadAuto}>自動改定CSV（Amazon仕様）</button>
+            <button onClick={downloadAuto}>自動改定CSV（{getAdapter(platform)?.label ?? ''}仕様）</button>
             <button onClick={downloadManual}>手動対応リストCSV</button>
             <button onClick={downloadDetail} style={{ background: '#f7fbff', border: '1px solid #0070f3', color: '#0070f3' }}>
               詳細CSV（検証用・全カラム）
@@ -523,7 +525,7 @@ export default function App() {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 900 }}>
               <thead>
                 <tr>
-                  <th style={thSticky}>SKU</th>
+                  <th style={thSticky}>{adapterLabels.sku}</th>
                   <th style={thSticky}>商品名</th>
                   <th style={{ ...thSticky, textAlign: 'right' }}>現価格</th>
                   <th style={{ ...thSticky, textAlign: 'right' }}>改定後価格</th>
@@ -661,12 +663,6 @@ const filterTabInactive: React.CSSProperties = {
   background: '#fff',
   color: '#333',
 };
-
-function csvEscape(s: string): string {
-  if (s == null) return '';
-  if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
-  return s;
-}
 
 function download(filename: string, content: string) {
   // BOM付きUTF-8でExcel互換

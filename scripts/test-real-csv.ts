@@ -3,7 +3,7 @@
  *   npx tsx scripts/test-real-csv.ts
  */
 import { readFileSync } from 'fs';
-import { parseAmazonCsv } from '../lib/csv';
+import { amazonAdapter } from '../lib/adapters/amazon';
 import { calculatePrice, type KeywordRule } from '../lib/parser';
 
 const CSV_PATH =
@@ -23,7 +23,7 @@ const RULES: KeywordRule[] = [
 
 console.log('CSV読み込み中...');
 const buf = readFileSync(CSV_PATH);
-const rows = parseAmazonCsv(buf, { activeOnly: true });
+const rows = amazonAdapter.parseCsv(buf, { activeOnly: true });
 console.log(`Active商品: ${rows.length} 件`);
 
 console.log('\n価格計算中...');
