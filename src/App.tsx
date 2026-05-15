@@ -234,35 +234,6 @@ export default function App() {
     <main style={{ maxWidth: 1100, margin: '0 auto', padding: 24, fontFamily: 'sans-serif', background: '#fff', color: '#000', minHeight: '100vh' }}>
       <h1>価格改定ツール</h1>
 
-      {/* プラットフォーム切替タブ（土台のみ・Shopifyは準備中） */}
-      <div style={{ display: 'flex', gap: 4, borderBottom: '2px solid #ddd', marginBottom: 16, flexWrap: 'wrap' }}>
-        <button
-          onClick={() => setPlatform('amazon')}
-          style={platform === 'amazon' ? tabActive : tabInactive}
-        >
-          Amazon
-        </button>
-        <button
-          onClick={() => setPlatform('shopify')}
-          style={platform === 'shopify' ? tabActive : tabInactive}
-        >
-          Shopify（準備中）
-        </button>
-      </div>
-
-      {platform === 'shopify' && (
-        <section style={{ ...card, background: '#fafafa' }}>
-          <h2 style={{ marginTop: 0 }}>Shopify対応は準備中です</h2>
-          <p style={{ color: '#555', fontSize: 14 }}>
-            Amazonと同じルール定義を使ってShopify側の価格も一括改定できるよう、次のフェーズで対応予定です。
-            <br />
-            画面上部の「Amazon」タブから現在の機能が利用できます。
-          </p>
-        </section>
-      )}
-
-      {platform === 'amazon' && (
-      <>
       <p style={{ color: '#555' }}>
         商品名のキーワード一致で「ケーブル単価×長さ×本数＋プラグ単価×個数」を現在価格に加算します。
         <br />
@@ -408,7 +379,32 @@ export default function App() {
       </section>
 
       <section style={card}>
-        <h2>3. 実行</h2>
+        <h2>3. プラットフォームを選択</h2>
+        <div style={{ display: 'flex', gap: 4, borderBottom: '2px solid #ddd', flexWrap: 'wrap' }}>
+          <button
+            onClick={() => setPlatform('amazon')}
+            style={platform === 'amazon' ? tabActive : tabInactive}
+          >
+            Amazon
+          </button>
+          <button
+            onClick={() => setPlatform('shopify')}
+            style={platform === 'shopify' ? tabActive : tabInactive}
+          >
+            Shopify（準備中）
+          </button>
+        </div>
+        {platform === 'shopify' && (
+          <p style={{ color: '#555', fontSize: 14, marginTop: 12, marginBottom: 0 }}>
+            Shopify対応は準備中です。Amazonをお選びください。
+          </p>
+        )}
+      </section>
+
+      {platform === 'amazon' && (
+      <>
+      <section style={card}>
+        <h2>4. 実行</h2>
         <button
           onClick={onSubmit}
           disabled={loading}
@@ -431,7 +427,7 @@ export default function App() {
 
       {data && (
         <section style={card}>
-          <h2>4. 結果</h2>
+          <h2>5. 結果</h2>
           <p>
             読み込み件数: <b>{data.total.toLocaleString()}</b> 件 ／ 自動改定: <b style={{ color: '#080' }}>{data.autoCount.toLocaleString()}</b> 件 ／
             手動対応: <b style={{ color: '#c80' }}>{data.manualCount.toLocaleString()}</b> 件
