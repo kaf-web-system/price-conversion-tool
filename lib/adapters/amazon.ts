@@ -54,6 +54,8 @@ function parseAmazonCsv(
     const status = (r['ステータス'] ?? '').trim();
     if (!sku && !asin) continue;
     if (!name) continue;
+    // Amazon出品レポートは仕様上必ず 'Active'（Pascalcase）。
+    // Shopify側はバリアント補完で空文字になりうるため寛容判定だが、Amazonは厳密一致でOK。
     if (opts.activeOnly && status !== 'Active') continue;
     const price = parseFloat(priceStr.replace(/[^\d.]/g, ''));
     rows.push({

@@ -91,22 +91,11 @@ function parseShopifyCsv(
       cache = { title: titleRaw, vendor: vendorRaw, status: statusRaw };
       filledByHandle.set(handle, cache);
     } else {
-      // 既存キャッシュ：この行で値が空ならキャッシュから、値があれば更新もしてキャッシュへ反映
-      if (!titleRaw && cache.title) {
-        // 補完
-      } else if (titleRaw && !cache.title) {
-        cache.title = titleRaw;
-      }
-      if (!vendorRaw && cache.vendor) {
-        // 補完
-      } else if (vendorRaw && !cache.vendor) {
-        cache.vendor = vendorRaw;
-      }
-      if (!statusRaw && cache.status) {
-        // 補完
-      } else if (statusRaw && !cache.status) {
-        cache.status = statusRaw;
-      }
+      // 既存キャッシュ：この行で値があってキャッシュが空ならキャッシュへ反映。
+      // この行で値が空ならキャッシュからの補完を下の filled[...] 側で実施。
+      if (titleRaw && !cache.title) cache.title = titleRaw;
+      if (vendorRaw && !cache.vendor) cache.vendor = vendorRaw;
+      if (statusRaw && !cache.status) cache.status = statusRaw;
     }
 
     const filled: Record<string, string> = { ...r };
@@ -134,8 +123,11 @@ function parseShopifyCsv(
     const priceNum = parseFloat(priceStr.replace(/[^\d.]/g, ''));
     if (!priceStr || isNaN(priceNum) || priceNum <= 0) continue;
 
-    // activeOnly 指定時は status === 'active' のみ
-    if (opts.activeOnly && status.toLowerCase() !== 'active') continue;
+    // activeOnly 指定時は status === 'active' のみ。
+    // ただし「Status空文字」は active 扱いとして寛容に判定する。
+    // バリアント2行目以降や Status 列自体が無いCSVの場合、前方補完で埋まらず
+    // 空文字のままになるケースがあり、厳密一致だと全部スキップされてしまうため。
+    if (opts.activeOnly && status !== '' && status.toLowerCase() !== 'active') continue;
 
     rows.push({
       sku,
