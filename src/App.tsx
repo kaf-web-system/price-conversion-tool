@@ -178,6 +178,22 @@ export default function App() {
     return { rate };
   }, [data]);
 
+  // 詳細CSV（検証用・全カラム）ダウンロード
+  const downloadDetail = () => {
+    if (!data) return;
+    const lines = ['sku,商品名,現価格,改定後価格,差額,マッチしたルール,分類'];
+    for (const r of data.results) {
+      const klass = r.newPrice === null ? `手動対応: ${r.manualReason ?? ''}` : '自動改定';
+      const newP = r.newPrice !== null ? String(r.newPrice) : '';
+      const diff = r.diff !== null ? (r.diff >= 0 ? `+${r.diff}` : String(r.diff)) : '';
+      const rule = r.matchedRuleLabel ?? '';
+      lines.push(
+        `${csvEscape(r.sku)},${csvEscape(r.productName)},${r.currentPrice},${newP},${csvEscape(diff)},${csvEscape(rule)},${csvEscape(klass)}`
+      );
+    }
+    download('amazon_price_detail.csv', lines.join('\n'));
+  };
+
   // フィルタ済みプレビューリスト
   const filteredResults = useMemo(() => {
     if (!data) return [] as CalcResult[];
@@ -418,6 +434,9 @@ export default function App() {
           <div style={{ display: 'flex', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
             <button onClick={downloadAuto}>自動改定CSV（Amazon仕様）</button>
             <button onClick={downloadManual}>手動対応リストCSV</button>
+            <button onClick={downloadDetail} style={{ background: '#f7fbff', border: '1px solid #0070f3', color: '#0070f3' }}>
+              詳細CSV（検証用・全カラム）
+            </button>
           </div>
 
           {/* フィルタタブ */}
