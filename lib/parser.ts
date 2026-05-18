@@ -29,11 +29,16 @@ export type KeywordRule = {
  * プラットフォーム非依存の商品行（読み込み後の正規化済み形）
  * - Amazon: sku=出品者SKU, productId=ASIN
  * - Shopify: sku=Variant SKU, productId=Handle
+ *
+ * productName は解析用（B案でOption Valueから合成された値を含むことがある）。
+ * originalProductName は出力用（CSVの原本 Title。Shopify書き戻し時に破壊しないため）。
  */
 export type ProductRow = {
   sku: string;
   productId: string;
   productName: string;
+  /** CSV原本のTitle（解析合成前）。出力CSVで原本を温存する用。未指定なら productName と同じ。 */
+  originalProductName?: string;
   currentPrice: number;
   status: string;
   raw: Record<string, string>;
@@ -43,6 +48,8 @@ export type CalcResult = {
   sku: string;
   productId: string;
   productName: string;
+  /** CSV原本のTitle。Shopify書き戻し時に productName（合成後）ではなくこちらを使う。 */
+  originalProductName: string;
   currentPrice: number;
   newPrice: number | null;
   diff: number | null;
@@ -146,6 +153,7 @@ export function calculatePrice(row: ProductRow, rules: KeywordRule[]): CalcResul
     sku: row.sku,
     productId: row.productId,
     productName: row.productName,
+    originalProductName: row.originalProductName ?? row.productName,
     currentPrice: row.currentPrice,
     newPrice: null,
     diff: null,

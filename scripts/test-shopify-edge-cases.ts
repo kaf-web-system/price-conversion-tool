@@ -5,6 +5,7 @@
  * Option Value からの長さ抽出が正しく動くか、特殊ケースをチェックする。
  */
 import { shopifyAdapter } from '../lib/adapters/shopify';
+import { calculatePrice, type KeywordRule } from '../lib/parser';
 
 type Case = {
   name: string;
@@ -186,6 +187,32 @@ for (const c of cases) {
   }
 }
 
+// ============================================================
+// buildAutoCsv の Title が「合成前の原本」になっているかを最終確認
+// （Shopify書き戻し時の商品名破壊防止）
+// ============================================================
+console.log(`\n----- buildAutoCsv の Title 列が原本Titleか確認 -----`);
+const verifyCsv = `Handle,Title,Vendor,Option1 Name,Option1 Value,Variant SKU,Variant Price,Status
+verify-1,MOGAMI 2534 XLRケーブル,音光堂,長さ,3m,,8500,active`;
+const verifyRows = shopifyAdapter.parseCsv(Buffer.from(verifyCsv, 'utf-8'), { activeOnly: true });
+const verifyRules: KeywordRule[] = [
+  { id: 'v', label: 'MOGAMI 2534', pattern: 'MOGAMI\\s*2534', cablePerMeter: 150, plugPerPiece: 0 },
+];
+const verifyResults = verifyRows.map((r) => calculatePrice(r, verifyRules));
+const autoCsv = shopifyAdapter.buildAutoCsv(verifyResults);
+console.log(autoCsv);
+const titleLine = autoCsv.split('\n')[1] ?? '';
+if (titleLine.includes('(3m)')) {
+  console.log('❌ buildAutoCsv の Title 列に "(3m)" が混入している（productName 合成後が漏れた）');
+  fail++;
+} else if (titleLine.includes('MOGAMI 2534 XLRケーブル')) {
+  console.log('✅ buildAutoCsv の Title は原本通り（合成後の "(3m)" は含まれない）');
+  pass++;
+} else {
+  console.log('❌ Title 出力が想定外:', titleLine);
+  fail++;
+}
+
 console.log(`\n============================`);
-console.log(`Pass: ${pass} / Fail: ${fail} / Total: ${cases.length}`);
+console.log(`Pass: ${pass} / Fail: ${fail} / Total: ${cases.length + 1}`);
 process.exit(fail === 0 ? 0 : 1);

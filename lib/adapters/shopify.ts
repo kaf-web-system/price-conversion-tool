@@ -213,6 +213,9 @@ function parseShopifyCsv(
       sku,
       productId: handle,
       productName,
+      // 解析用 productName は B案で合成した値（"…(3m) 2本"）。
+      // 出力CSV用には合成前の原本 Title を使う（Shopify書き戻し時に商品名を破壊しないため）。
+      originalProductName: name,
       currentPrice: priceNum,
       status,
       raw: r,
@@ -224,17 +227,18 @@ function parseShopifyCsv(
 /**
  * 自動改定用CSV: `Handle,Title,Variant SKU,Variant Price`（安全構成4列）
  * LF改行、UTF-8（BOMなし）。改定対象（newPrice !== null）のみ出力。
- * Title は ProductRow.raw['Title'] から取得（parseCsv で前方補完済み）。
+ *
+ * **重要**: Title 列には B案で合成された解析用 productName ではなく、
+ * CSV原本の Title（originalProductName）を出力する。
+ * 合成後の "...(3m) 2本" を書き戻すと、Shopify側で商品名が破壊されるため。
  */
 function buildAutoCsv(results: CalcResult[]): string {
   const header = 'Handle,Title,Variant SKU,Variant Price';
   const rows = results
     .filter((r) => r.newPrice !== null)
     .map((r) => {
-      // CalcResult には raw を持っていないため、productId(=Handle)・productName(=Title) を使う
-      // ※ parseShopifyCsv の段階で前方補完済みなので productName は必ず埋まっている
       const handle = r.productId;
-      const title = r.productName;
+      const title = r.originalProductName; // ← 合成前の原本Titleを出力
       return `${escapeCsv(handle)},${escapeCsv(title)},${escapeCsv(r.sku)},${r.newPrice}`;
     });
   return [header, ...rows].join('\n');
