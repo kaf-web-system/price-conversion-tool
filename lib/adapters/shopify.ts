@@ -36,8 +36,9 @@
  * 5. バリアント行で Variant SKU が空のケースの扱い（現状はスキップ）
  * 6. 商品名（Title）の命名規則：Amazon と同表記か、Shopify用に短縮されているか
  *    → 同表記でなければ既存の正規表現ルール側の調整が必要
- * 7. 長さ・本数が Title に含まれない場合：Option1 Value（例：「3m」）から
- *    取得する分岐（設計プランB案）への切替検討
+ * 7. 長さ・本数が Title に含まれない場合：Option1/2/3 Value（例：「3m」「0.5m 2本セット」）
+ *    から取得する **B案ロジックを実装済み（2026-05-18）**。Title優先・Option Valueフォールバック。
+ *    "Default Title"（バリアント無し商品のShopify標準値）は対象外。
  */
 
 import Papa from 'papaparse';
@@ -46,8 +47,70 @@ import type { PlatformAdapter } from './types';
 import { escapeCsv } from '../csv-utils';
 
 /**
+ * Option1/2/3 Value から長さ表記を含むかどうか判定するための正規表現。
+ *
+ * 想定パターン:
+ *   "3m" "5m" "10m" "1.5m" "0.5m" → m 表記
+ *   "30cm" "50cm" → cm 表記
+ *   "3M" "5M" → 大文字 m
+ *   "50mリール" "100mロール" "0.5m 2本セット" "0.5m（2本セット）" → 後ろに何か続くケース
+ *
+ * 弾きたいパターン:
+ *   "Default Title" → バリアント無し商品（Shopify標準値）
+ *   "" → 空文字
+ *   "mogami" "max" 等の英単語の途中にある m は弾く（後方境界で英字を禁止）
+ */
+const LENGTH_IN_OPTION_RE = /(\d+\.?\d*)\s*(m|M|cm|CM|Cm|cM)(?![a-zA-Z])/;
+
+/**
+ * 「N本」表記が Option Value に含まれているかチェック。
+ * "0.5m 2本セット" "0.5m（2本セット）" 等から本数も拾えるようにする。
+ */
+const PIECES_IN_OPTION_RE = /(\d+)\s*本/;
+
+/**
+ * Option1/2/3 Value から「長さ・本数」を取得する。
+ * 「Default Title」など長さを含まない値は null を返す。
+ *
+ * 戻り値:
+ *   { lengthStr: "3m" | "30cm" 等, piecesStr?: "2本セット" 等 } | null
+ *
+ * - 1番目に該当が見つかった Option を採用（Option1優先）
+ * - 単位を再正規化はせず、検出した元の表記を返す（解析側で extractLengthMeters が再度パースする）
+ */
+function extractFromOptionValues(
+  r: Record<string, string>
+): { lengthStr: string; piecesStr: string | null } | null {
+  for (const idx of [1, 2, 3] as const) {
+    const v = (r[`Option${idx} Value`] ?? '').trim();
+    if (!v) continue;
+    // "Default Title" は Shopify がバリアント無し商品に自動付与する値。長さ取得対象外。
+    if (v.toLowerCase() === 'default title') continue;
+
+    const lenMatch = v.match(LENGTH_IN_OPTION_RE);
+    if (!lenMatch) continue;
+
+    const lengthStr = `${lenMatch[1]}${lenMatch[2].toLowerCase()}`; // 小文字に正規化（m / cm）
+    const piecesMatch = v.match(PIECES_IN_OPTION_RE);
+    const piecesStr = piecesMatch ? `${piecesMatch[1]}本` : null;
+    return { lengthStr, piecesStr };
+  }
+  return null;
+}
+
+/**
  * Shopify 商品エクスポートCSV(UTF-8)をブラウザ内でパースして ProductRow[] に変換。
  * バリアント行（同一Handleの2行目以降）は Title 等が空欄になるため前方補完する。
+ *
+ * 長さ取得ロジック（B案・2026-05-18 追加）:
+ *   1. Title に長さ表記がある → そのまま使う（A案フォールバック）
+ *   2. Title に長さ表記がない & Option Value に長さ表記がある → productName 末尾に
+ *      「(3m)」等を追記して、既存の extractLengthMeters でそのまま拾えるようにする。
+ *      "0.5m 2本セット" のように本数表記もあれば末尾に追記する。
+ *   3. どちらにも無ければ手動対応（既存挙動）
+ *
+ * 既存ロジック（calculatePrice / extractLengthMeters / extractCablePieces）には
+ * 一切手を入れず、productName への「合成」だけで対応する。
  */
 function parseShopifyCsv(
   buffer: ArrayBuffer | Uint8Array,
@@ -114,8 +177,10 @@ function parseShopifyCsv(
     const priceStr = (r['Variant Price'] ?? '').trim();
     const status = (r['Status'] ?? '').trim();
 
-    // SKU が空、または Handle/Title が空の行はスキップ
-    if (!sku) continue;
+    // Handle / Title が空の行はスキップ。
+    // Variant SKU は徳山様CSVのようにほぼ全行空欄のストアが存在するため、空欄でも取り込む。
+    //   - 識別子は Handle を主とする
+    //   - 出力CSV側で SKU 列が空欄でも Shopify は Handle + バリアント識別（Option1/2/3 Value）で照合可能
     if (!handle) continue;
     if (!name) continue;
 
@@ -129,10 +194,25 @@ function parseShopifyCsv(
     // 空文字のままになるケースがあり、厳密一致だと全部スキップされてしまうため。
     if (opts.activeOnly && status !== '' && status.toLowerCase() !== 'active') continue;
 
+    // B案：Title に長さ表記が無ければ Option Value から取得して productName に合成する。
+    // 既存の extractLengthMeters / extractCablePieces は商品名文字列のみを引数に取るため、
+    // ここで「(3m) 2本」の形で末尾に追記しておけば下流のロジックには一切触れずに済む。
+    let productName = name;
+    const titleHasLength = LENGTH_IN_OPTION_RE.test(name); // Title 内に長さ表記があるか
+    if (!titleHasLength) {
+      const fromOpt = extractFromOptionValues(r);
+      if (fromOpt) {
+        // 例: "MOGAMI 2534 ステレオミニフォン (15cm)" や
+        //     "MOGAMI 2972 外皮加工済み (0.5m) 2本" 等
+        const piecesSuffix = fromOpt.piecesStr ? ` ${fromOpt.piecesStr}` : '';
+        productName = `${name} (${fromOpt.lengthStr})${piecesSuffix}`;
+      }
+    }
+
     rows.push({
       sku,
       productId: handle,
-      productName: name,
+      productName,
       currentPrice: priceNum,
       status,
       raw: r,
