@@ -13,10 +13,14 @@ type CalcSummary = {
 /** プラットフォーム切替（将来のShopify対応のための土台） */
 type Platform = 'amazon' | 'shopify';
 
+// DEFAULT_RULES のパターンは buildRegexFromCode で動的生成する。
+// これにより lib/csv.ts の改善（半角/全角スペース吸収・ハイフン揺れ吸収・単語境界）が
+// DEFAULT_RULES にも自動反映され、`CANARE L-4E6SAT` のような型番違い商品への
+// 誤マッチを防げる。
 const DEFAULT_RULES: KeywordRule[] = [
-  { id: '1', label: 'BELDEN 88760', pattern: 'BELDEN\\s*88760', cablePerMeter: 200, plugPerPiece: 300 },
-  { id: '2', label: 'MOGAMI 2534', pattern: 'MOGAMI\\s*2534', cablePerMeter: 150, plugPerPiece: 300 },
-  { id: '3', label: 'CANARE L-4E6S', pattern: 'CANARE\\s*L-?4E6S', cablePerMeter: 100, plugPerPiece: 250 },
+  { id: '1', label: 'BELDEN 88760', pattern: buildRegexFromCode('BELDEN 88760'), cablePerMeter: 200, plugPerPiece: 300 },
+  { id: '2', label: 'MOGAMI 2534', pattern: buildRegexFromCode('MOGAMI 2534'), cablePerMeter: 150, plugPerPiece: 300 },
+  { id: '3', label: 'CANARE L-4E6S', pattern: buildRegexFromCode('CANARE L-4E6S'), cablePerMeter: 100, plugPerPiece: 250 },
 ];
 
 export default function App() {

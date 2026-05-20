@@ -192,6 +192,82 @@ console.log('\n[6] 後方互換性（既存 matchCableAndPlug）');
 }
 
 // ─────────────────────────────────────────
+//  7. 両端同プラグの出現回数カウント（章尋さん指示 2026-05-21）
+// ─────────────────────────────────────────
+console.log('\n[7] 両端同プラグの出現回数カウント');
+{
+  const rules: KeywordRule[] = [
+    { id: 'c1', label: 'BELDEN 19364', pattern: buildRegexFromCode('BELDEN 19364'), cablePerMeter: 200, plugPerPiece: 0 },
+    { id: 'p1', label: 'ME2591', pattern: buildRegexFromCode('ME2591'), cablePerMeter: 0, plugPerPiece: 400 },
+    { id: 'p2', label: 'NL4', pattern: buildRegexFromCode('NL4'), cablePerMeter: 0, plugPerPiece: 500 },
+  ];
+
+  // 「ベルデン 19364 ME2591-NL4-ME2591 (4m)」
+  // チェーン "ME2591-NL4-ME2591" 内で ME2591 が2回・NL4 が1回出現
+  // → ケーブル 4m × 200 = 800
+  // → プラグ ME2591 × 2 × 400 = 800
+  // → プラグ NL4 × 1 × 500 = 500
+  // → 合計加算 +2,100
+  const name = 'BELDEN 19364 ME2591-NL4-ME2591 変換ケーブル (4m)';
+  const { cable, plugs } = matchCableAndPlugs(name, rules);
+  assertEq('cableルール = BELDEN 19364', cable?.label ?? null, 'BELDEN 19364');
+  assertEq('plugsが合計3件（ME2591×2 + NL4×1）', plugs.length, 3);
+  const me2591Count = plugs.filter((p) => p.label === 'ME2591').length;
+  const nl4Count = plugs.filter((p) => p.label === 'NL4').length;
+  assertEq('ME2591 が2個カウント', me2591Count, 2);
+  assertEq('NL4 が1個カウント', nl4Count, 1);
+
+  const row: AmazonRow = {
+    sku: 'TEST-7',
+    asin: 'B00TEST',
+    productName: name,
+    currentPrice: 10000,
+    status: 'Active',
+    raw: {},
+  };
+  const result = calculatePrice(row, rules);
+  // 10,000 + 800 + 800 + 500 = 12,100
+  assertEq('新価格 = 12,100', result.newPrice, 12100);
+  assertEq('差分 = +2,100', result.diff, 2100);
+  // matchedRuleLabel は重複なし表示
+  assertEq('matchedLabel は重複なし表示', result.matchedRuleLabel, 'BELDEN 19364 + ME2591 + NL4');
+}
+
+// ─────────────────────────────────────────
+//  8. ハイフン繋ぎ外（フリーテキスト）の重複は1個カウント
+// ─────────────────────────────────────────
+console.log('\n[8] フリーテキスト内の重複出現は1個カウント（誤検出抑止）');
+{
+  const rules: KeywordRule[] = [
+    { id: 'p1', label: 'ME2591', pattern: buildRegexFromCode('ME2591'), cablePerMeter: 0, plugPerPiece: 400 },
+  ];
+  // ハイフン繋ぎでない、自由記述で2回出現するケース
+  const name = 'ME2591 高品質 ME2591 ペアセット (1m)';
+  const { plugs } = matchCableAndPlugs(name, rules);
+  // チェーンには含まれないので1個のみ
+  assertEq('フリーテキスト内2回出現 → 1個カウントのみ', plugs.length, 1);
+}
+
+// ─────────────────────────────────────────
+//  9. DEFAULT_RULES 相当の単語境界（CANARE L-4E6S vs L-4E6SAT）
+// ─────────────────────────────────────────
+console.log('\n[9] DEFAULT_RULES の単語境界（CANARE L-4E6S vs L-4E6SAT）');
+{
+  // App.tsx の DEFAULT_RULES と同じ生成方法
+  const rules: KeywordRule[] = [
+    { id: 'd1', label: 'CANARE L-4E6S', pattern: buildRegexFromCode('CANARE L-4E6S'), cablePerMeter: 100, plugPerPiece: 250 },
+  ];
+
+  // L-4E6SAT 商品（CANAREの別型番）には CANARE L-4E6S ルールがマッチしてはいけない
+  // 「L-4E6SAT」は「L-4E6S」の末尾に英字 A が続いており、単語境界（末尾の負後読み）で除外されるはず
+  const re = new RegExp(rules[0].pattern, 'i');
+  assertEq('CANARE L-4E6S が "CANARE L-4E6SAT" にマッチしない', re.test('CANARE L-4E6SAT 高品質ケーブル (2m)'), false);
+  assertEq('CANARE L-4E6S が "CANARE L-4E6S" にマッチする', re.test('CANARE L-4E6S 高品質ケーブル (2m)'), true);
+  // ハイフン無し表記（CANARE L4E6S）にもマッチする（揺れ吸収）
+  assertEq('CANARE L-4E6S が "CANARE L4E6S" にマッチする（ハイフン揺れ吸収）', re.test('CANARE L4E6S 高品質ケーブル (2m)'), true);
+}
+
+// ─────────────────────────────────────────
 //  結果
 // ─────────────────────────────────────────
 console.log(`\n=== 結果: ${passed} passed, ${failed} failed ===`);

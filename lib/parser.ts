@@ -131,9 +131,20 @@ export function matchCableAndPlug(name: string, rules: KeywordRule[]): {
  *   「ハイフンで繋がっているのは別単位として認識する」
  *   例: "ME2591-NAC3FCA" は ME2591 と NAC3FCA の2プラグ別々として合算する
  *
- * ハイフン繋ぎを明示的に分割する必要はなく、各プラグルールの正規表現が
- * 個別にヒットすれば自然に複数マッチする（buildRegexFromCode で生成される
- * パターンはハイフンを `[-‐−–—]?` として吸収しつつ、両側に単語境界を付ける）。
+ * 章尋さん追加指示（2026-05-21）:
+ *   「同じプラグであっても両端の場合は2個でカウントして」
+ *   例: "ME2591-NL4-ME2591" は ME2591 を **2個**、NL4 を 1個としてカウントする
+ *
+ * 実装方針:
+ *   - ハイフン繋ぎの「型番チェーン」（例: "ME2591-NL4-ME2591"）を抽出する
+ *   - チェーン内では各プラグルールが出現した回数分カウント（両端同プラグに対応）
+ *   - チェーン外（商品名のフリーテキスト部分）はルール1件につき最大1回カウント
+ *     （「ME2591 高音質ペアセット ME2591」のような自由記述での誤検出を防ぐため）
+ *
+ * 戻り値の `plugs` 配列には、出現回数分だけ同じルールを重複させて入れる。
+ * 例: ME2591 が2回出現すれば plugs に ME2591 ルールが 2回入る。
+ * これにより既存の `plugRules.reduce((sum, p) => sum + pieces * p.plugPerPiece, 0)`
+ * がそのまま正しい合算額を計算できる。
  */
 export function matchCableAndPlugs(name: string, rules: KeywordRule[]): {
   cable: KeywordRule | null;
@@ -141,7 +152,20 @@ export function matchCableAndPlugs(name: string, rules: KeywordRule[]): {
 } {
   let cable: KeywordRule | null = null;
   const plugs: KeywordRule[] = [];
-  const seenPlugIds = new Set<string>();
+
+  // ハイフン繋ぎの「型番チェーン」を抽出する。
+  // 「英数字を含むトークンが [-‐−–—] で2つ以上連結されている部分」を対象。
+  // 例: "ME2591-NL4-ME2591" → ヒット
+  //     "ME2591-NAC3FCA"   → ヒット
+  //     単独の "ME2591"    → ヒットしない（チェーンではない）
+  const HYPHEN_CLASS = '[-‐−–—]';
+  const TOKEN = '[A-Za-z0-9][A-Za-z0-9/]*';
+  const chainRe = new RegExp(`${TOKEN}(?:${HYPHEN_CLASS}${TOKEN}){1,}`, 'g');
+  const chains: string[] = [];
+  for (const m of name.matchAll(chainRe)) {
+    chains.push(m[0]);
+  }
+
   for (const rule of rules) {
     let re: RegExp;
     try {
@@ -150,10 +174,26 @@ export function matchCableAndPlugs(name: string, rules: KeywordRule[]): {
       continue;
     }
     if (!re.test(name)) continue;
+
     if (rule.cablePerMeter > 0 && !cable) cable = rule;
-    if (rule.plugPerPiece > 0 && !seenPlugIds.has(rule.id)) {
-      plugs.push(rule);
-      seenPlugIds.add(rule.id);
+
+    if (rule.plugPerPiece > 0) {
+      // チェーン内で何回出現するかをカウント
+      let chainCount = 0;
+      for (const chain of chains) {
+        const reForChain = new RegExp(rule.pattern, 'gi');
+        const matches = chain.match(reForChain);
+        if (matches) chainCount += matches.length;
+      }
+
+      if (chainCount >= 1) {
+        // チェーン内出現 → 回数分 push（両端同プラグ対応）
+        for (let i = 0; i < chainCount; i++) plugs.push(rule);
+      } else {
+        // チェーン外（フリーテキスト）でヒットしたケース → 1個だけカウント
+        // （誤検出抑止のため複数出現でも1個とする）
+        plugs.push(rule);
+      }
     }
   }
   return { cable, plugs };
@@ -196,12 +236,20 @@ export function calculatePrice(row: AmazonRow, rules: KeywordRule[]): CalcResult
   const cablePieces = extractCablePieces(row.productName);
   const pieces = extractPieces(row.productName);
 
-  // ラベル生成ヘルパー：cable と plug が同一ルール（4列形式で1ルールに両方の単価が入っている）の場合は重複を消す
+  // ラベル生成ヘルパー：
+  //   - cable と plug が同一ルール（4列形式で1ルールに両方の単価が入っている）の場合は重複を消す
+  //   - 両端同プラグ等で plugRules 配列に同じルールが複数回入っているケースも、
+  //     表示ラベルは一意化する（matchedRuleLabel には1回だけ表示）
   const labelParts: string[] = [];
-  if (cableRule) labelParts.push(cableRule.label);
+  const seenLabelIds = new Set<string>();
+  if (cableRule) {
+    labelParts.push(cableRule.label);
+    seenLabelIds.add(cableRule.id);
+  }
   for (const p of plugRules) {
-    if (cableRule && p.id === cableRule.id) continue; // ケーブルと同一ルールは省く
+    if (seenLabelIds.has(p.id)) continue;
     labelParts.push(p.label);
+    seenLabelIds.add(p.id);
   }
   const matchedLabel = labelParts.join(' + ');
 
