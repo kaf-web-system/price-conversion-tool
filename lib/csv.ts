@@ -272,14 +272,20 @@ function parseCsvLine(line: string): string[] {
  *   - ハイフン（-, −, ‐）   → `[-‐−–—]?`
  *   - 連続スペース           → `\s*`
  *
+ * 単語境界（最長マッチ）:
+ *   - 型番の先頭・末尾が英数字なら、その外側に英数字が続かないことをアサート
+ *   - 例: "NP3X-B" は "NP3X-BAG" に**マッチしない**ようにする
+ *   - 例: "88760" は "188760" に**マッチしない**ようにする
+ *
  * 例:
- *   "BELDEN 88760"      → "BELDEN\\s*88760"
- *   "CANARE L-4E6S"     → "CANARE\\s*L[-‐−–—]?4E6S"
- *   "NP2X-BAG"          → "NP2X[-‐−–—]?BAG"
- *   "ACPL-CRD"          → "ACPL[-‐−–—]?CRD"
+ *   "BELDEN 88760"      → "(?<![A-Za-z0-9])BELDEN\\s*88760(?![A-Za-z0-9])"
+ *   "CANARE L-4E6S"     → "(?<![A-Za-z0-9])CANARE\\s*L[-‐−–—]?4E6S(?![A-Za-z0-9])"
+ *   "NP2X-BAG"          → "(?<![A-Za-z0-9])NP2X[-‐−–—]?BAG(?![A-Za-z0-9])"
+ *   "NP3X-B"            → "(?<![A-Za-z0-9])NP3X[-‐−–—]?B(?![A-Za-z0-9])"
+ *                          ↑ "NP3X-BAG" にはマッチしない（B の直後が A で英数字のため）
  *
  * 既に正規表現の特殊文字（\, [, (, ., * 等）が含まれている場合は
- * 「ユーザが直接書いた」と判断してエスケープ加工はしない。
+ * 「ユーザが直接書いた」と判断してエスケープ加工はしない（境界も付けない）。
  */
 export function buildRegexFromCode(code: string): string {
   if (!code) return '';
@@ -298,5 +304,13 @@ export function buildRegexFromCode(code: string): string {
   // ハイフン類を [-‐−–—]? へ（揺れ吸収）
   pattern = pattern.replace(/[-‐−–—]/g, '[-‐−–—]?');
 
-  return pattern;
+  // 単語境界アサーション（先頭・末尾が英数字の場合のみ付与）
+  // 注: JavaScript の \b はASCII単語境界のみで、隣にハイフンや全角文字があると
+  //     誤判定するため、明示的に英数字以外を要求する lookbehind/lookahead を使う。
+  const first = code[0];
+  const last = code[code.length - 1];
+  const prefix = /[A-Za-z0-9]/.test(first) ? '(?<![A-Za-z0-9])' : '';
+  const suffix = /[A-Za-z0-9]/.test(last) ? '(?![A-Za-z0-9])' : '';
+
+  return prefix + pattern + suffix;
 }

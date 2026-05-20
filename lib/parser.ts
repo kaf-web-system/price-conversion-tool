@@ -111,15 +111,38 @@ export function matchRule(name: string, rules: KeywordRule[]): KeywordRule | nul
  * 1商品名に対して、「ケーブル系（1m単価>0）」と「プラグ系（プラグ単価>0）」を別々に探して両方返す。
  * これにより、商品名にケーブル型番とプラグ型番の両方が含まれる場合に両方加算できる。
  * 例: "MOGAMI 2534 NC3FXX-B (1m)" → cable: 2534ルール, plug: NC3FXX-Bルール
+ *
+ * 後方互換のため戻り値は { cable, plug } の単一形のまま。
+ * 複数プラグ合算には `matchCableAndPlugs`（複数形）を使う。
  */
 export function matchCableAndPlug(name: string, rules: KeywordRule[]): {
   cable: KeywordRule | null;
   plug: KeywordRule | null;
 } {
+  const { cable, plugs } = matchCableAndPlugs(name, rules);
+  return { cable, plug: plugs[0] ?? null };
+}
+
+/**
+ * 1商品名に対して、ケーブルルール（最初の1件）と
+ * プラグルール（マッチしたものすべて）を返す。
+ *
+ * 徳山様仕様確認（2026-05-20）に基づく拡張:
+ *   「ハイフンで繋がっているのは別単位として認識する」
+ *   例: "ME2591-NAC3FCA" は ME2591 と NAC3FCA の2プラグ別々として合算する
+ *
+ * ハイフン繋ぎを明示的に分割する必要はなく、各プラグルールの正規表現が
+ * 個別にヒットすれば自然に複数マッチする（buildRegexFromCode で生成される
+ * パターンはハイフンを `[-‐−–—]?` として吸収しつつ、両側に単語境界を付ける）。
+ */
+export function matchCableAndPlugs(name: string, rules: KeywordRule[]): {
+  cable: KeywordRule | null;
+  plugs: KeywordRule[];
+} {
   let cable: KeywordRule | null = null;
-  let plug: KeywordRule | null = null;
+  const plugs: KeywordRule[] = [];
+  const seenPlugIds = new Set<string>();
   for (const rule of rules) {
-    if (cable && plug) break;
     let re: RegExp;
     try {
       re = new RegExp(rule.pattern, 'i');
@@ -128,9 +151,12 @@ export function matchCableAndPlug(name: string, rules: KeywordRule[]): {
     }
     if (!re.test(name)) continue;
     if (rule.cablePerMeter > 0 && !cable) cable = rule;
-    if (rule.plugPerPiece > 0 && !plug) plug = rule;
+    if (rule.plugPerPiece > 0 && !seenPlugIds.has(rule.id)) {
+      plugs.push(rule);
+      seenPlugIds.add(rule.id);
+    }
   }
-  return { cable, plug };
+  return { cable, plugs };
 }
 
 /** 価格計算: 新価格 = 現在価格 + (長さ × ケーブル本数 × ケーブル単価) + (プラグ個数 × プラグ単価) */
@@ -159,9 +185,10 @@ export function calculatePrice(row: AmazonRow, rules: KeywordRule[]): CalcResult
   }
 
   // ケーブル系・プラグ系を別々にマッチ（両方含む商品で合算するため）
-  const { cable: cableRule, plug: plugRule } = matchCableAndPlug(row.productName, rules);
+  // プラグは複数ヒットした場合すべて合算する（徳山様仕様確認 2026-05-20）
+  const { cable: cableRule, plugs: plugRules } = matchCableAndPlugs(row.productName, rules);
 
-  if (!cableRule && !plugRule) {
+  if (!cableRule && plugRules.length === 0) {
     return { ...base, manualReason: 'キーワードに一致しない' };
   }
 
@@ -169,12 +196,20 @@ export function calculatePrice(row: AmazonRow, rules: KeywordRule[]): CalcResult
   const cablePieces = extractCablePieces(row.productName);
   const pieces = extractPieces(row.productName);
 
+  // ラベル生成ヘルパー：cable と plug が同一ルール（4列形式で1ルールに両方の単価が入っている）の場合は重複を消す
+  const labelParts: string[] = [];
+  if (cableRule) labelParts.push(cableRule.label);
+  for (const p of plugRules) {
+    if (cableRule && p.id === cableRule.id) continue; // ケーブルと同一ルールは省く
+    labelParts.push(p.label);
+  }
+  const matchedLabel = labelParts.join(' + ');
+
   // ケーブル単価ありなのに長さが取れない場合は手動送り
   if (cableRule && lengthM === null) {
-    const labels = [cableRule.label, plugRule?.label].filter(Boolean).join(' + ');
     return {
       ...base,
-      matchedRuleLabel: labels,
+      matchedRuleLabel: matchedLabel,
       cablePieces,
       pieces,
       manualReason: '長さが商品名から読み取れない',
@@ -182,16 +217,9 @@ export function calculatePrice(row: AmazonRow, rules: KeywordRule[]): CalcResult
   }
 
   const cableAdd = cableRule ? (lengthM ?? 0) * cablePieces * cableRule.cablePerMeter : 0;
-  const plugAdd = plugRule ? pieces * plugRule.plugPerPiece : 0;
+  // プラグは各ルールの単価×個数を合算
+  const plugAdd = plugRules.reduce((sum, p) => sum + pieces * p.plugPerPiece, 0);
   const newPrice = Math.round(row.currentPrice + cableAdd + plugAdd);
-
-  // マッチラベル：cable と plug が同一ルール（4列形式で1ルールに両方の単価が入っているケース）の場合は1つだけ表示
-  let matchedLabel: string;
-  if (cableRule && plugRule && cableRule.id === plugRule.id) {
-    matchedLabel = cableRule.label;
-  } else {
-    matchedLabel = [cableRule?.label, plugRule?.label].filter(Boolean).join(' + ');
-  }
 
   return {
     ...base,
