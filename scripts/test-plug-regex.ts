@@ -14,7 +14,10 @@
 
 import { buildRegexFromCode } from '../lib/csv';
 import {
+  BI_WIRING_RE,
   calculatePrice,
+  extractCablePieces,
+  extractLengthMeters,
   matchCableAndPlugs,
   type AmazonRow,
   type KeywordRule,
@@ -265,6 +268,108 @@ console.log('\n[9] DEFAULT_RULES の単語境界（CANARE L-4E6S vs L-4E6SAT）'
   assertEq('CANARE L-4E6S が "CANARE L-4E6S" にマッチする', re.test('CANARE L-4E6S 高品質ケーブル (2m)'), true);
   // ハイフン無し表記（CANARE L4E6S）にもマッチする（揺れ吸収）
   assertEq('CANARE L-4E6S が "CANARE L4E6S" にマッチする（ハイフン揺れ吸収）', re.test('CANARE L4E6S 高品質ケーブル (2m)'), true);
+}
+
+// ─────────────────────────────────────────
+// 10. 全角ｍ／ｃｍ対応（章尋さん指示 2026-05-21・修正A）
+// ─────────────────────────────────────────
+console.log('\n[10] 全角ｍ・ｃｍからの長さ抽出');
+{
+  // 全角ｍ：基本ケース
+  assertEq('「（4ｍ）」 → 4', extractLengthMeters('ベルデン 19364（4ｍ）BELDEN 88760'), 4);
+  // 全角ｃｍ：cm系
+  assertEq('「（30ｃｍ）」 → 0.3', extractLengthMeters('キャノン MOGAMI 2534（30ｃｍ）'), 0.3);
+  // 小数：全角ｍ
+  assertEq('「（1.5ｍ）」 → 1.5', extractLengthMeters('スピーカーケーブル（1.5ｍ）'), 1.5);
+  // 全角＋半角混在の括弧
+  assertEq('「(4ｍ)」（半角括弧＋全角ｍ） → 4', extractLengthMeters('ベルデン 19364(4ｍ)'), 4);
+  assertEq('「（4m）」（全角括弧＋半角m） → 4', extractLengthMeters('ベルデン 19364（4m）'), 4);
+
+  // 既存の半角ケースが引き続き動くか
+  assertEq('既存「（4m）」 → 4', extractLengthMeters('BELDEN 88760 (4m)'), 4);
+  assertEq('既存「(30cm)」 → 0.3', extractLengthMeters('キャノン MOGAMI 2534 (30cm)'), 0.3);
+  assertEq('既存「(1.5m)」 → 1.5', extractLengthMeters('SPC-REFERENCE (1.5m)'), 1.5);
+
+  // 大文字対応
+  assertEq('「(4M)」 → 4', extractLengthMeters('BELDEN 88760 (4M)'), 4);
+  assertEq('「(30CM)」 → 0.3', extractLengthMeters('MOGAMI 2534 (30CM)'), 0.3);
+
+  // 統合：全角ｍでケーブル合算が走るか
+  const rules: KeywordRule[] = [
+    { id: 'c1', label: 'BELDEN 19364', pattern: buildRegexFromCode('BELDEN 19364'), cablePerMeter: 200, plugPerPiece: 0 },
+    { id: 'p1', label: 'ME2591', pattern: buildRegexFromCode('ME2591'), cablePerMeter: 0, plugPerPiece: 400 },
+  ];
+  const row: AmazonRow = {
+    sku: 'TEST-10',
+    asin: 'B00TEST',
+    productName: 'BELDEN 19364 ME2591（4ｍ）',
+    currentPrice: 9100,
+    status: 'Active',
+    raw: {},
+  };
+  const result = calculatePrice(row, rules);
+  // 9100 + 4m × 1 × 200 + 1 × 400 = 9100 + 800 + 400 = 10300
+  assertEq('全角ｍ商品 → ケーブル合算が走る（+1,200）', result.diff, 1200);
+  assertEq('全角ｍ商品 → lengthM = 4', result.lengthM, 4);
+}
+
+// ─────────────────────────────────────────
+// 11. バイワイヤリング検出パターン統一（章尋さん指示 2026-05-21・修正C）
+// ─────────────────────────────────────────
+console.log('\n[11] バイワイヤリング検出パターンの統一');
+{
+  // 共通定数 BI_WIRING_RE がエクスポートされている
+  assertEq('BI_WIRING_RE: バイワイヤリングを検出', BI_WIRING_RE.test('スピーカー バイワイヤリング ケーブル'), true);
+  assertEq('BI_WIRING_RE: バイワイを検出', BI_WIRING_RE.test('スピーカー バイワイ ケーブル'), true);
+  assertEq('BI_WIRING_RE: bi-wireを検出', BI_WIRING_RE.test('Speaker bi-wire cable'), true);
+  assertEq('BI_WIRING_RE: bi wireを検出', BI_WIRING_RE.test('Speaker bi wire cable'), true);
+  assertEq('BI_WIRING_RE: 無関係文字列は検出しない', BI_WIRING_RE.test('普通のスピーカーケーブル'), false);
+
+  // 「バイワイ」だけが書かれた商品で、両方の判定が一致することを検証
+  const nameBaiwai = 'スピーカーケーブル バイワイ仕様 (3m)';
+
+  // extractCablePieces 側もバイワイを検出して 1 を返す（特殊扱い）
+  assertEq('extractCablePieces: バイワイ → 1（特殊扱い）', extractCablePieces(nameBaiwai), 1);
+
+  // calculatePrice 側でも バイワイ を検出して手動対応に回す
+  const rules: KeywordRule[] = [
+    { id: 'c1', label: 'TEST CABLE', pattern: buildRegexFromCode('スピーカーケーブル'), cablePerMeter: 100, plugPerPiece: 0 },
+  ];
+  const row: AmazonRow = {
+    sku: 'TEST-11',
+    asin: 'B00TEST',
+    productName: nameBaiwai,
+    currentPrice: 5000,
+    status: 'Active',
+    raw: {},
+  };
+  const result = calculatePrice(row, rules);
+  assertEq('calculatePrice: バイワイ → 手動対応に回る', result.manualReason, 'バイワイヤリング（特殊計算のため手動対応）');
+  assertEq('calculatePrice: バイワイ → newPrice = null', result.newPrice, null);
+
+  // 「バイワイヤリング」表記でも同様に手動対応
+  const rowBwr: AmazonRow = {
+    sku: 'TEST-11B',
+    asin: 'B00TEST',
+    productName: 'スピーカーケーブル バイワイヤリング仕様 (3m)',
+    currentPrice: 5000,
+    status: 'Active',
+    raw: {},
+  };
+  const resultBwr = calculatePrice(rowBwr, rules);
+  assertEq('バイワイヤリング → 手動対応', resultBwr.manualReason, 'バイワイヤリング（特殊計算のため手動対応）');
+
+  // 「bi wire」表記でも同様
+  const rowBi: AmazonRow = {
+    sku: 'TEST-11C',
+    asin: 'B00TEST',
+    productName: 'Speaker bi-wire cable (3m)',
+    currentPrice: 5000,
+    status: 'Active',
+    raw: {},
+  };
+  const resultBi = calculatePrice(rowBi, rules);
+  assertEq('bi-wire → 手動対応', resultBi.manualReason, 'バイワイヤリング（特殊計算のため手動対応）');
 }
 
 // ─────────────────────────────────────────

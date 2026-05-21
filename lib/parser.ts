@@ -46,16 +46,30 @@ export type CalcResult = {
   manualReason: string | null;
 };
 
-/** "(4m)" "(25cm)" "(1.5m)" 等から長さ(m)を抽出 */
+/**
+ * バイワイヤリング検出用の共通正規表現
+ * 商品名から「バイワイヤリング／バイワイ／bi-wir／bi wir」等を検出する。
+ * parser.ts 内の `extractCablePieces` と `calculatePrice`、両方の判定を統一する。
+ * （章尋さん指示 2026-05-21：場所によって検出基準が違うと整合性が崩れるため一本化）
+ */
+export const BI_WIRING_RE = /バイワイヤリング|バイワイ|bi[\s\-]?wir/i;
+
+/**
+ * "(4m)" "(25cm)" "(1.5m)" 等から長さ(m)を抽出
+ *
+ * 章尋さん指示（2026-05-21）：
+ *   半角「m/cm」だけでなく全角「ｍ/ｃｍ」、および大文字「M/Ｍ」「C/Ｃ」も認識する。
+ *   例：「（4ｍ）」「（30ｃｍ）」「(4M)」「(30CM)」も length 抽出が走る。
+ */
 export function extractLengthMeters(name: string): number | null {
-  // メートル表記
-  const mMatch = name.match(/[（(]\s*(\d+(?:\.\d+)?)\s*m\s*[）)]/i);
+  // メートル表記（半角 m / 全角 ｍ / 大文字 M / 全角大文字 Ｍ）
+  const mMatch = name.match(/[（(]\s*(\d+(?:\.\d+)?)\s*[mｍMＭ]\s*[）)]/);
   if (mMatch) return parseFloat(mMatch[1]);
-  // センチ表記
-  const cmMatch = name.match(/[（(]\s*(\d+(?:\.\d+)?)\s*cm\s*[）)]/i);
+  // センチ表記（c/ｃ/C/Ｃ + m/ｍ/M/Ｍ）
+  const cmMatch = name.match(/[（(]\s*(\d+(?:\.\d+)?)\s*[cｃCＣ][mｍMＭ]\s*[）)]/);
   if (cmMatch) return parseFloat(cmMatch[1]) / 100;
-  // 括弧外の "1.5m" 表記もフォールバック
-  const mFallback = name.match(/(\d+(?:\.\d+)?)\s*m(?![a-zA-Z])/);
+  // 括弧外の "1.5m" 表記もフォールバック（全角・大文字対応）
+  const mFallback = name.match(/(\d+(?:\.\d+)?)\s*[mｍMＭ](?![a-zA-Zａ-ｚＡ-Ｚ])/);
   if (mFallback) return parseFloat(mFallback[1]);
   return null;
 }
@@ -83,7 +97,8 @@ export function extractPieces(name: string): number {
  */
 export function extractCablePieces(name: string): number {
   // バイワイヤリングは特殊（Notion#7 仕様確認後に実装）→ 暫定で1本扱い
-  if (/バイワイヤリング|bi[\s\-]?wir/i.test(name)) return 1;
+  // 章尋さん指示 2026-05-21：calculatePrice 側と検出パターンを統一（共通定数 BI_WIRING_RE）
+  if (BI_WIRING_RE.test(name)) return 1;
   // 多芯ケーブル(8ch等) は1本のケーブルに芯が入っている構造なので1本
   if (/\d+\s*ch/i.test(name)) return 1;
   // "N本ペア" "N本セット"
@@ -220,7 +235,8 @@ export function calculatePrice(row: AmazonRow, rules: KeywordRule[]): CalcResult
   }
 
   // バイワイヤリング商品は特殊計算（2+4の×6、バナナはペアで×12、プラグ違いはa×2+b×4）が必要なため手動対応に回す
-  if (/バイワイヤリング|バイワイ|bi[\s\-]?wir/i.test(row.productName)) {
+  // 章尋さん指示 2026-05-21：extractCablePieces と検出パターンを統一（共通定数 BI_WIRING_RE）
+  if (BI_WIRING_RE.test(row.productName)) {
     return { ...base, manualReason: 'バイワイヤリング（特殊計算のため手動対応）' };
   }
 
