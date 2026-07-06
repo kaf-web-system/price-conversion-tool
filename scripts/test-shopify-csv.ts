@@ -152,7 +152,7 @@ for (const r of rowsB) {
     // productName が Title から変わっていれば誤検出
     const original = (r.raw['Title'] ?? '').trim();
     if (r.productName !== original) {
-      console.log(`  ⚠️ 誤検出: [${r.sku}] Title="${original}" / productName="${r.productName}"`);
+      console.log(`  [WARN] 誤検出: [${r.sku}] Title="${original}" / productName="${r.productName}"`);
       defaultTitleAutoCount++;
     }
   }

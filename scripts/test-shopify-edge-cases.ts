@@ -175,10 +175,10 @@ for (const c of cases) {
   }
 
   if (errors.length === 0) {
-    console.log(`✅ ${c.name}`);
+    console.log(`[OK] ${c.name}`);
     pass++;
   } else {
-    console.log(`❌ ${c.name}`);
+    console.log(`[NG] ${c.name}`);
     for (const e of errors) console.log(`     ${e}`);
     if (rows.length > 0) {
       console.log(`     実際の productName: "${rows[0].productName}"`);
@@ -203,13 +203,13 @@ const autoCsv = shopifyAdapter.buildAutoCsv(verifyResults);
 console.log(autoCsv);
 const titleLine = autoCsv.split('\n')[1] ?? '';
 if (titleLine.includes('(3m)')) {
-  console.log('❌ buildAutoCsv の Title 列に "(3m)" が混入している（productName 合成後が漏れた）');
+  console.log('[NG] buildAutoCsv の Title 列に "(3m)" が混入している（productName 合成後が漏れた）');
   fail++;
 } else if (titleLine.includes('MOGAMI 2534 XLRケーブル')) {
-  console.log('✅ buildAutoCsv の Title は原本通り（合成後の "(3m)" は含まれない）');
+  console.log('[OK] buildAutoCsv の Title は原本通り（合成後の "(3m)" は含まれない）');
   pass++;
 } else {
-  console.log('❌ Title 出力が想定外:', titleLine);
+  console.log('[NG] Title 出力が想定外:', titleLine);
   fail++;
 }
 
