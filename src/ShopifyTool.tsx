@@ -248,7 +248,7 @@ export default function ShopifyTool({ rules, rulesSection }: Props) {
                     <td style={tdClamp} title={r.originalTitle}>{r.originalTitle.slice(0, 40)}{r.originalTitle.length > 40 ? '…' : ''}</td>
                     <td style={tdClamp} title={r.productName}>{r.productName.slice(0, 40)}{r.productName.length > 40 ? '…' : ''}</td>
                     <td style={td}>{r.sku || '—'}</td>
-                    <td style={td}>{r.matchedRuleLabel ?? '-'}</td>
+                    <td style={td}>{r.allMatchedLabels || '-'}</td>
                     <td style={td}>{r.lengthM ?? '-'}</td>
                     <td style={td}>{r.pieces ?? '-'}</td>
                     <td style={td}>{r.currentPrice.toLocaleString()}</td>

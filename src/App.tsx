@@ -175,6 +175,7 @@ export default function App() {
             matchedRuleLabel: null, lengthM: null, pieces: null,
             manualReason: `計算エラー: ${e instanceof Error ? e.message : String(e)}`,
             cableRateUnregistered: false,
+            cableAdd: 0, plugAdd: 0, plugLabels: '', allMatchedLabels: '',
           } satisfies CalcResult;
         }
       });
@@ -223,7 +224,7 @@ export default function App() {
         r.currentPrice,
         isAuto ? r.newPrice! : '',
         isAuto ? r.diff! : '',
-        csvEscape(r.matchedRuleLabel ?? ''),
+        csvEscape(r.allMatchedLabels),
         r.lengthM ?? '',
         r.pieces ?? '',
         isAuto ? r.cableAdd : '',
@@ -483,7 +484,7 @@ export default function App() {
                           <td style={td} title={r.productName}>{r.productName.slice(0, 40)}{r.productName.length > 40 ? '…' : ''}</td>
                           <td style={tdClamp} title={r.description}>{r.description.slice(0, 80)}{r.description.length > 80 ? '…' : ''}</td>
                           <td style={tdClamp} title={r.bulletPoints}>{r.bulletPoints.slice(0, 80)}{r.bulletPoints.length > 80 ? '…' : ''}</td>
-                          <td style={td}>{r.matchedRuleLabel ?? '-'}</td>
+                          <td style={td}>{r.allMatchedLabels || '-'}</td>
                           <td style={td}>{r.lengthM ?? '-'}</td>
                           <td style={td}>{r.pieces ?? '-'}</td>
                           <td style={td}>{r.currentPrice.toLocaleString()}</td>
