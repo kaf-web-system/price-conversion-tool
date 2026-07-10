@@ -211,13 +211,15 @@ export default function App() {
 
   const downloadCheck = () => {
     if (!data) return;
-    const lines = ['sku,asin,商品名,現在価格,改定後価格,差額,マッチ,長さm,個数,ケーブル加算,プラグ加算,プラグ内訳,手動対応理由,ケーブル単価未登録'];
+    const lines = ['sku,asin,商品名,商品説明,商品仕様,現在価格,改定後価格,差額,マッチ,長さm,個数,ケーブル加算,プラグ加算,プラグ内訳,手動対応理由,ケーブル単価未登録'];
     for (const r of data.results) {
       const isAuto = r.newPrice !== null;
       lines.push([
         csvEscape(r.sku),
         csvEscape(r.asin),
         csvEscape(r.productName),
+        csvEscape(r.description),
+        csvEscape(r.bulletPoints),
         r.currentPrice,
         isAuto ? r.newPrice! : '',
         isAuto ? r.diff! : '',
