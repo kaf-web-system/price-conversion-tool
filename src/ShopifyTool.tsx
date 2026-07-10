@@ -141,7 +141,7 @@ export default function ShopifyTool({ rules, rulesSection }: Props) {
   return (
     <div>
       {/* 1. ファイル選択 */}
-      <section style={card}>
+      <section className="border border-gray-300 rounded-md p-4 mt-4">
         <h2>1. Shopify商品CSVを選ぶ</h2>
         <input
           type="file"
@@ -151,12 +151,12 @@ export default function ShopifyTool({ rules, rulesSection }: Props) {
             setResults(null); setError(null); setInventoryMsg(null); setParseInfo(null);
           }}
         />
-        <label style={{ marginLeft: 16 }}>
+        <label className="ml-4">
           <input type="checkbox" checked={activeOnly} onChange={(e) => setActiveOnly(e.target.checked)} />
           {' '}Activeのみ対象（Status が active または空欄の行）
         </label>
         {file && (
-          <p style={{ color: '#888', fontSize: 13, margin: '4px 0 0' }}>
+          <p className="text-gray-500 text-[13px] mt-1">
             {file.name} ({(file.size / 1024 / 1024).toFixed(2)} MB)
           </p>
         )}
@@ -166,23 +166,23 @@ export default function ShopifyTool({ rules, rulesSection }: Props) {
       {rulesSection}
 
       {/* 3. 実行 */}
-      <section style={card}>
+      <section className="border border-gray-300 rounded-md p-4 mt-4">
         <h2>3. 実行</h2>
-        <button
-          onClick={onRun}
-          disabled={loading}
-          style={{
-            padding: '10px 28px', fontSize: 16, border: 0, borderRadius: 4,
-            cursor: loading ? 'wait' : 'pointer',
-            background: loading ? '#aaa' : '#0070f3', color: '#fff',
-            fontWeight: 600, letterSpacing: '0.02em',
-          }}
-        >
-          {loading ? '計算中...' : '価格改定を実行（Shopify）'}
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={onRun}
+            disabled={loading}
+            className={`px-7 py-2.5 text-base font-semibold border-0 rounded text-white tracking-wide ${
+              loading ? 'bg-gray-400 cursor-wait' : 'bg-[#0070f3] cursor-pointer'
+            }`}
+          >
+            {loading ? '計算中...' : '価格改定を実行'}
+          </button>
+          <span className="px-3 py-1 text-sm font-bold text-white rounded bg-[#95BF47]">Shopify</span>
+        </div>
 
         {error && (
-          <div style={{ color: '#c00', marginTop: 12, padding: '10px 14px', background: '#fff5f5', border: '1px solid #fcc', borderRadius: 4, fontSize: 14 }}>
+          <div className="text-red-700 mt-3 px-3.5 py-2.5 bg-red-50 border border-red-200 rounded text-sm">
             <b>エラー:</b> {error}
           </div>
         )}
@@ -190,27 +190,58 @@ export default function ShopifyTool({ rules, rulesSection }: Props) {
 
       {/* 診断パネル */}
       {(parseInfo !== null || inventoryMsg !== null) && (
-        <section style={card}>
+        <section className="border border-gray-300 rounded-md p-4 mt-4">
           <h2>診断パネル</h2>
           {inventoryMsg !== null && (
-            <div style={{ marginBottom: 10, padding: '6px 12px', background: inventoryMsg.includes('失敗') ? '#fff5f5' : '#f0f8ff', border: `1px solid ${inventoryMsg.includes('失敗') ? '#fcc' : '#b0d4f0'}`, borderRadius: 4, fontSize: 13 }}>
+            <div className={`mb-2.5 px-3 py-1.5 rounded text-[13px] border ${inventoryMsg.includes('失敗') ? 'bg-red-50 border-red-200' : 'bg-blue-50 border-blue-200'}`}>
               {inventoryMsg.includes('失敗') ? '❌' : 'ℹ️'} {inventoryMsg}
             </div>
           )}
           {parseInfo !== null && results !== null && (
-            <table style={{ borderCollapse: 'collapse', fontSize: 13 }}>
+            <table className="border-collapse text-[13px]">
               <tbody>
-                <tr><td style={diagTh}>CSV取込行数（Handle あり）</td><td style={diagTd}>{parseInfo.totalRaw.toLocaleString()} 件</td></tr>
-                <tr><td style={{ ...diagTh, paddingLeft: 16, color: '#888', fontWeight: 'normal' }}>└ 価格なし（読み飛ばし）</td><td style={{ ...diagTd, color: '#888' }}>{parseInfo.skipNoPrice.toLocaleString()} 件</td></tr>
-                <tr><td style={{ ...diagTh, paddingLeft: 16, color: '#888', fontWeight: 'normal' }}>└ Title空（補完後も）</td><td style={{ ...diagTd, color: '#888' }}>{parseInfo.skipNoTitle.toLocaleString()} 件</td></tr>
-                {activeOnly && <tr><td style={{ ...diagTh, paddingLeft: 16, color: '#888', fontWeight: 'normal' }}>└ Status除外（Active以外）</td><td style={{ ...diagTd, color: '#888' }}>{parseInfo.skipStatus.toLocaleString()} 件</td></tr>}
-                <tr><td style={diagTh}>有効行（計算対象）</td><td style={{ ...diagTd, fontWeight: 'bold' }}>{results.length.toLocaleString()} 件</td></tr>
-                <tr><td style={diagTh}>自動改定</td><td style={{ ...diagTd, color: '#047857', fontWeight: 'bold' }}>{autoResults.length.toLocaleString()} 件</td></tr>
-                <tr><td style={diagTh}>手動対応</td><td style={{ ...diagTd, color: '#b45309', fontWeight: 'bold' }}>{manualResults.length.toLocaleString()} 件</td></tr>
+                <tr>
+                  <td className="pr-3 py-0.5 font-bold whitespace-nowrap align-top text-gray-600">CSV取込行数（Handle あり）</td>
+                  <td className="py-0.5 align-top">{parseInfo.totalRaw.toLocaleString()} 件</td>
+                </tr>
+                <tr>
+                  <td className="pr-3 py-0.5 whitespace-nowrap align-top text-gray-400 font-normal pl-4">└ 価格なし（読み飛ばし）</td>
+                  <td className="py-0.5 align-top text-gray-400">{parseInfo.skipNoPrice.toLocaleString()} 件</td>
+                </tr>
+                <tr>
+                  <td className="pr-3 py-0.5 whitespace-nowrap align-top text-gray-400 font-normal pl-4">└ Title空（補完後も）</td>
+                  <td className="py-0.5 align-top text-gray-400">{parseInfo.skipNoTitle.toLocaleString()} 件</td>
+                </tr>
+                {activeOnly && (
+                  <tr>
+                    <td className="pr-3 py-0.5 whitespace-nowrap align-top text-gray-400 font-normal pl-4">└ Status除外（Active以外）</td>
+                    <td className="py-0.5 align-top text-gray-400">{parseInfo.skipStatus.toLocaleString()} 件</td>
+                  </tr>
+                )}
+                <tr>
+                  <td className="pr-3 py-0.5 font-bold whitespace-nowrap align-top text-gray-600">有効行（計算対象）</td>
+                  <td className="py-0.5 align-top font-bold">{results.length.toLocaleString()} 件</td>
+                </tr>
+                <tr>
+                  <td className="pr-3 py-0.5 font-bold whitespace-nowrap align-top text-gray-600">自動改定</td>
+                  <td className="py-0.5 align-top text-emerald-700 font-bold">{autoResults.length.toLocaleString()} 件</td>
+                </tr>
+                <tr>
+                  <td className="pr-3 py-0.5 font-bold whitespace-nowrap align-top text-gray-600">手動対応</td>
+                  <td className="py-0.5 align-top text-amber-700 font-bold">{manualResults.length.toLocaleString()} 件</td>
+                </tr>
                 {Object.entries(reasonCounts).map(([reason, count]) => (
-                  <tr key={reason}><td style={{ ...diagTh, paddingLeft: 16, color: '#888', fontWeight: 'normal' }}>└ {reason}</td><td style={{ ...diagTd, color: '#888' }}>{count.toLocaleString()} 件</td></tr>
+                  <tr key={reason}>
+                    <td className="pr-3 py-0.5 whitespace-nowrap align-top text-gray-400 font-normal pl-4">└ {reason}</td>
+                    <td className="py-0.5 align-top text-gray-400">{count.toLocaleString()} 件</td>
+                  </tr>
                 ))}
-                {cableUnregisteredCount > 0 && <tr><td style={{ ...diagTh, color: '#c00' }}>ケーブル単価未登録フラグ</td><td style={{ ...diagTd, color: '#c00', fontWeight: 'bold' }}>{cableUnregisteredCount.toLocaleString()} 件</td></tr>}
+                {cableUnregisteredCount > 0 && (
+                  <tr>
+                    <td className="pr-3 py-0.5 font-bold whitespace-nowrap align-top text-red-600">ケーブル単価未登録フラグ</td>
+                    <td className="py-0.5 align-top text-red-600 font-bold">{cableUnregisteredCount.toLocaleString()} 件</td>
+                  </tr>
+                )}
               </tbody>
             </table>
           )}
@@ -219,43 +250,51 @@ export default function ShopifyTool({ rules, rulesSection }: Props) {
 
       {/* 4. 結果 */}
       {results !== null && (
-        <section style={card}>
+        <section className="border border-gray-300 rounded-md p-4 mt-4">
           <h2>4. 結果</h2>
-          <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
-            <button onClick={downloadAuto} disabled={autoResults.length === 0} style={btnDownloadGreen}>
+          <div className="flex gap-3 mb-4 flex-wrap">
+            <button onClick={downloadAuto} disabled={autoResults.length === 0} className="px-5 py-2.5 text-[15px] font-bold bg-emerald-700 text-white border-0 rounded cursor-pointer tracking-wide disabled:opacity-50">
               自動改定CSVをダウンロード（{autoResults.length}件）
             </button>
-            <button onClick={downloadManual} disabled={manualResults.length === 0} style={btnDownloadOrange}>
+            <button onClick={downloadManual} disabled={manualResults.length === 0} className="px-5 py-2.5 text-[15px] font-bold bg-amber-700 text-white border-0 rounded cursor-pointer tracking-wide disabled:opacity-50">
               手動対応リストCSVをダウンロード（{manualResults.length}件）
             </button>
           </div>
 
-          <h3 style={{ margin: '0 0 8px' }}>プレビュー（先頭50件）</h3>
-          <div style={{ overflow: 'auto', maxHeight: 500, border: '1px solid #ddd' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+          <h3 className="mb-2">プレビュー（先頭50件）</h3>
+          <div className="overflow-auto max-h-[500px] border border-gray-300">
+            <table className="w-full border-collapse text-xs">
               <thead>
-                <tr style={{ background: '#f0f0f0', position: 'sticky', top: 0 }}>
-                  <th style={th}>Handle</th><th style={th}>Title（原本）</th><th style={th}>マッチ用合成名</th>
-                  <th style={th}>SKU</th><th style={th}>マッチルール</th><th style={th}>長さ(m)</th>
-                  <th style={th}>個数</th><th style={th}>現価格</th><th style={th}>新価格</th>
-                  <th style={th}>差額</th><th style={th}>手動理由</th><th style={th}>単価未登録</th>
+                <tr className="bg-gray-100 sticky top-0">
+                  <th className="border border-gray-300 px-2 py-1.5 text-left">Handle</th>
+                  <th className="border border-gray-300 px-2 py-1.5 text-left">Title（原本）</th>
+                  <th className="border border-gray-300 px-2 py-1.5 text-left">マッチ用合成名</th>
+                  <th className="border border-gray-300 px-2 py-1.5 text-left">SKU</th>
+                  <th className="border border-gray-300 px-2 py-1.5 text-left">マッチルール</th>
+                  <th className="border border-gray-300 px-2 py-1.5 text-left">長さ(m)</th>
+                  <th className="border border-gray-300 px-2 py-1.5 text-left">個数</th>
+                  <th className="border border-gray-300 px-2 py-1.5 text-left">現価格</th>
+                  <th className="border border-gray-300 px-2 py-1.5 text-left">新価格</th>
+                  <th className="border border-gray-300 px-2 py-1.5 text-left">差額</th>
+                  <th className="border border-gray-300 px-2 py-1.5 text-left">手動理由</th>
+                  <th className="border border-gray-300 px-2 py-1.5 text-left">単価未登録</th>
                 </tr>
               </thead>
               <tbody>
                 {preview.map((r, i) => (
-                  <tr key={i} style={{ background: r.newPrice === null ? '#fff8e1' : r.cableRateUnregistered ? '#fff0f0' : 'transparent', borderTop: '1px solid #eee' }}>
-                    <td style={td}>{r.handle}</td>
-                    <td style={tdClamp} title={r.originalTitle}>{r.originalTitle.slice(0, 40)}{r.originalTitle.length > 40 ? '…' : ''}</td>
-                    <td style={tdClamp} title={r.productName}>{r.productName.slice(0, 40)}{r.productName.length > 40 ? '…' : ''}</td>
-                    <td style={td}>{r.sku || '—'}</td>
-                    <td style={td}>{r.allMatchedLabels || '-'}</td>
-                    <td style={td}>{r.lengthM ?? '-'}</td>
-                    <td style={td}>{r.pieces ?? '-'}</td>
-                    <td style={td}>{r.currentPrice.toLocaleString()}</td>
-                    <td style={td}>{r.newPrice !== null ? r.newPrice.toLocaleString() : '-'}</td>
-                    <td style={td}>{r.diff !== null ? `+${r.diff.toLocaleString()}` : '-'}</td>
-                    <td style={td}>{r.manualReason ?? ''}</td>
-                    <td style={td}>{r.cableRateUnregistered ? '●' : ''}</td>
+                  <tr key={i} className={`border-t border-gray-200 ${r.newPrice === null ? 'bg-amber-50' : r.cableRateUnregistered ? 'bg-red-50' : ''}`}>
+                    <td className="border border-gray-200 px-2 py-1 align-top">{r.handle}</td>
+                    <td className="border border-gray-200 px-2 py-1 align-top max-w-[180px] truncate" title={r.originalTitle}>{r.originalTitle.slice(0, 40)}{r.originalTitle.length > 40 ? '…' : ''}</td>
+                    <td className="border border-gray-200 px-2 py-1 align-top max-w-[180px] truncate" title={r.productName}>{r.productName.slice(0, 40)}{r.productName.length > 40 ? '…' : ''}</td>
+                    <td className="border border-gray-200 px-2 py-1 align-top">{r.sku || '—'}</td>
+                    <td className="border border-gray-200 px-2 py-1 align-top">{r.allMatchedLabels || '-'}</td>
+                    <td className="border border-gray-200 px-2 py-1 align-top">{r.lengthM ?? '-'}</td>
+                    <td className="border border-gray-200 px-2 py-1 align-top">{r.pieces ?? '-'}</td>
+                    <td className="border border-gray-200 px-2 py-1 align-top">{r.currentPrice.toLocaleString()}</td>
+                    <td className="border border-gray-200 px-2 py-1 align-top">{r.newPrice !== null ? r.newPrice.toLocaleString() : '-'}</td>
+                    <td className="border border-gray-200 px-2 py-1 align-top">{r.diff !== null ? `+${r.diff.toLocaleString()}` : '-'}</td>
+                    <td className="border border-gray-200 px-2 py-1 align-top">{r.manualReason ?? ''}</td>
+                    <td className="border border-gray-200 px-2 py-1 align-top">{r.cableRateUnregistered ? '●' : ''}</td>
                   </tr>
                 ))}
               </tbody>
@@ -266,12 +305,3 @@ export default function ShopifyTool({ rules, rulesSection }: Props) {
     </div>
   );
 }
-
-const card: React.CSSProperties = { border: '1px solid #ddd', borderRadius: 6, padding: 16, marginTop: 16 };
-const th: React.CSSProperties = { border: '1px solid #ddd', padding: '6px 8px', textAlign: 'left' };
-const td: React.CSSProperties = { border: '1px solid #eee', padding: '4px 8px', verticalAlign: 'top' };
-const tdClamp: React.CSSProperties = { border: '1px solid #eee', padding: '4px 8px', verticalAlign: 'top', maxWidth: 180, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
-const diagTh: React.CSSProperties = { padding: '3px 12px 3px 0', fontWeight: 'bold', whiteSpace: 'nowrap', verticalAlign: 'top', color: '#444' };
-const diagTd: React.CSSProperties = { padding: '3px 0', verticalAlign: 'top' };
-const btnDownloadGreen: React.CSSProperties = { padding: '10px 22px', fontSize: 15, fontWeight: 700, background: '#047857', color: '#fff', border: 0, borderRadius: 5, cursor: 'pointer', letterSpacing: '0.02em' };
-const btnDownloadOrange: React.CSSProperties = { padding: '10px 22px', fontSize: 15, fontWeight: 700, background: '#b45309', color: '#fff', border: 0, borderRadius: 5, cursor: 'pointer', letterSpacing: '0.02em' };

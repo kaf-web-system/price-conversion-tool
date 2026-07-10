@@ -37,10 +37,8 @@ export default function StockEditor() {
   const [success, setSuccess] = useState<string | null>(null);
   const [search, setSearch] = useState('');
 
-  // 新規追加フォーム
   const [draft, setDraft] = useState<DraftRow>(EMPTY_DRAFT);
 
-  // インライン編集
   const [editId, setEditId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<DraftRow>(EMPTY_DRAFT);
 
@@ -119,55 +117,65 @@ export default function StockEditor() {
     }
   };
 
+  const filteredRows = rows.filter((row) => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return row.sku.toLowerCase().includes(q) || (row.plug_name ?? '').toLowerCase().includes(q);
+  });
+
   return (
-    <div style={{ maxWidth: 860, margin: '0 auto', padding: 24, fontFamily: 'sans-serif', color: '#000' }}>
-      <h2 style={{ marginTop: 0 }}>在庫DB（stock）編集</h2>
-      <p style={{ color: '#555', fontSize: 13, margin: '0 0 16px' }}>
+    <div className="max-w-[860px] mx-auto p-6 font-sans text-black">
+      <h2 className="mt-0">在庫DB（stock）編集</h2>
+      <p className="text-gray-600 text-[13px] mb-4">
         SKU と プラグ型番（plug_name）の対応を管理します。
         ここで登録した plug_name が価格改定ツールのプラグ判定に使われます。
       </p>
 
       {error && (
-        <div style={msgStyle('#fff5f5', '#fcc', '#c00')}><b>エラー:</b> {error}</div>
+        <div className="bg-red-50 border border-red-200 text-red-600 rounded px-3 py-2 mb-3 text-[13px]">
+          <b>エラー:</b> {error}
+        </div>
       )}
       {success && (
-        <div style={msgStyle('#f0fff4', '#9e9', '#080')}>{success}</div>
+        <div className="bg-green-50 border border-green-300 text-green-700 rounded px-3 py-2 mb-3 text-[13px]">
+          {success}
+        </div>
       )}
 
       {/* 新規追加フォーム */}
-      <div style={{ ...card, marginBottom: 20 }}>
-        <h3 style={{ margin: '0 0 10px', fontSize: 14 }}>新規追加</h3>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+      <div className="border border-gray-300 rounded p-3 mb-5">
+        <h3 className="m-0 mb-2.5 text-sm">新規追加</h3>
+        <div className="flex gap-2 items-center flex-wrap">
           <input
             placeholder="SKU（必須）"
             value={draft.sku}
             onChange={(e) => setDraft((d) => ({ ...d, sku: e.target.value }))}
             onKeyDown={(e) => { if (e.key === 'Enter') handleAdd(); }}
-            style={inp}
+            className="px-2 py-1 border border-gray-400 rounded text-[13px] bg-white text-black min-w-[160px] box-border"
           />
           <input
             placeholder="プラグ型番 / plug_name"
             value={draft.plug_name}
             onChange={(e) => setDraft((d) => ({ ...d, plug_name: e.target.value }))}
             onKeyDown={(e) => { if (e.key === 'Enter') handleAdd(); }}
-            style={{ ...inp, minWidth: 220 }}
+            className="px-2 py-1 border border-gray-400 rounded text-[13px] bg-white text-black min-w-[220px] box-border"
           />
-          <button onClick={handleAdd} style={btnPrimary}>追加</button>
+          <button onClick={handleAdd} className="px-4 py-1.5 bg-[#0070f3] text-white border-0 rounded cursor-pointer text-[13px]">追加</button>
         </div>
       </div>
 
       {/* 検索ボックス */}
-      <div style={{ marginBottom: 10 }}>
+      <div className="mb-2.5">
         <input
           placeholder="SKU / plug_name で絞り込み（部分一致）"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          style={{ ...inp, minWidth: 300, maxWidth: 400 }}
+          className="px-2 py-1 border border-gray-400 rounded text-[13px] bg-white text-black min-w-[300px] max-w-[400px] box-border"
         />
         {search && (
           <button
             onClick={() => setSearch('')}
-            style={{ marginLeft: 8, padding: '5px 10px', fontSize: 12, cursor: 'pointer', border: '1px solid #ccc', borderRadius: 3, background: '#fff', color: '#555' }}
+            className="ml-2 px-2.5 py-1 text-xs cursor-pointer border border-gray-300 rounded bg-white text-gray-600"
           >
             クリア
           </button>
@@ -175,60 +183,54 @@ export default function StockEditor() {
       </div>
 
       {/* 一覧テーブル */}
-      <div style={{ border: '1px solid #ddd', borderRadius: 4, overflow: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+      <div className="border border-gray-300 rounded overflow-auto">
+        <table className="w-full border-collapse text-[13px]">
           <thead>
-            <tr style={{ background: '#f0f0f0' }}>
-              <th style={th}>SKU</th>
-              <th style={th}>plug_name</th>
-              <th style={th}>登録日時</th>
-              <th style={{ ...th, width: 120 }}>操作</th>
+            <tr className="bg-gray-100">
+              <th className="border border-gray-300 px-2.5 py-1.5 text-left font-semibold">SKU</th>
+              <th className="border border-gray-300 px-2.5 py-1.5 text-left font-semibold">plug_name</th>
+              <th className="border border-gray-300 px-2.5 py-1.5 text-left font-semibold">登録日時</th>
+              <th className="border border-gray-300 px-2.5 py-1.5 text-left font-semibold w-[120px]">操作</th>
             </tr>
           </thead>
           <tbody>
             {loading && (
-              <tr><td colSpan={4} style={{ padding: 16, textAlign: 'center', color: '#888' }}>読み込み中...</td></tr>
+              <tr><td colSpan={4} className="p-4 text-center text-gray-500">読み込み中...</td></tr>
             )}
             {!loading && rows.length === 0 && (
-              <tr><td colSpan={4} style={{ padding: 16, textAlign: 'center', color: '#888' }}>データがありません</td></tr>
+              <tr><td colSpan={4} className="p-4 text-center text-gray-500">データがありません</td></tr>
             )}
-            {rows
-              .filter((row) => {
-                if (!search) return true;
-                const q = search.toLowerCase();
-                return row.sku.toLowerCase().includes(q) || (row.plug_name ?? '').toLowerCase().includes(q);
-              })
-              .map((row) =>
+            {filteredRows.map((row) =>
               editId === row.id ? (
-                <tr key={row.id} style={{ background: '#fffef0' }}>
-                  <td style={td}>
+                <tr key={row.id} className="bg-yellow-50">
+                  <td className="px-2.5 py-1.5 align-middle">
                     <input
                       value={editDraft.sku}
                       onChange={(e) => setEditDraft((d) => ({ ...d, sku: e.target.value }))}
-                      style={{ ...inp, width: '100%' }}
+                      className="px-2 py-1 border border-gray-400 rounded text-[13px] bg-white text-black w-full box-border"
                     />
                   </td>
-                  <td style={td}>
+                  <td className="px-2.5 py-1.5 align-middle">
                     <input
                       value={editDraft.plug_name}
                       onChange={(e) => setEditDraft((d) => ({ ...d, plug_name: e.target.value }))}
-                      style={{ ...inp, width: '100%' }}
+                      className="px-2 py-1 border border-gray-400 rounded text-[13px] bg-white text-black w-full box-border"
                     />
                   </td>
-                  <td style={{ ...td, color: '#aaa', fontSize: 11 }}>{formatDate(row.created_at)}</td>
-                  <td style={td}>
-                    <button onClick={() => handleSave(row.id)} style={{ ...btnSmall, background: '#0070f3', color: '#fff', marginRight: 4 }}>保存</button>
-                    <button onClick={cancelEdit} style={btnSmall}>取消</button>
+                  <td className="px-2.5 py-1.5 align-middle text-gray-300 text-[11px]">{formatDate(row.created_at)}</td>
+                  <td className="px-2.5 py-1.5 align-middle">
+                    <button onClick={() => handleSave(row.id)} className="px-2.5 py-0.5 bg-[#0070f3] text-white border-0 rounded cursor-pointer text-xs mr-1">保存</button>
+                    <button onClick={cancelEdit} className="px-2.5 py-0.5 bg-white text-gray-700 border border-gray-300 rounded cursor-pointer text-xs">取消</button>
                   </td>
                 </tr>
               ) : (
-                <tr key={row.id} style={{ borderTop: '1px solid #eee' }}>
-                  <td style={td}>{row.sku}</td>
-                  <td style={{ ...td, color: row.plug_name ? '#000' : '#bbb' }}>{row.plug_name ?? '（未設定）'}</td>
-                  <td style={{ ...td, color: '#888', fontSize: 11 }}>{formatDate(row.created_at)}</td>
-                  <td style={td}>
-                    <button onClick={() => startEdit(row)} style={{ ...btnSmall, marginRight: 4 }}>編集</button>
-                    <button onClick={() => handleDelete(row.id, row.sku)} style={{ ...btnSmall, color: '#c00', borderColor: '#fcc' }}>削除</button>
+                <tr key={row.id} className="border-t border-gray-200">
+                  <td className="px-2.5 py-1.5 align-middle">{row.sku}</td>
+                  <td className={`px-2.5 py-1.5 align-middle ${row.plug_name ? 'text-black' : 'text-gray-300'}`}>{row.plug_name ?? '（未設定）'}</td>
+                  <td className="px-2.5 py-1.5 align-middle text-gray-500 text-[11px]">{formatDate(row.created_at)}</td>
+                  <td className="px-2.5 py-1.5 align-middle">
+                    <button onClick={() => startEdit(row)} className="px-2.5 py-0.5 bg-white text-gray-700 border border-gray-300 rounded cursor-pointer text-xs mr-1">編集</button>
+                    <button onClick={() => handleDelete(row.id, row.sku)} className="px-2.5 py-0.5 bg-white text-red-600 border border-red-200 rounded cursor-pointer text-xs">削除</button>
                   </td>
                 </tr>
               )
@@ -236,9 +238,9 @@ export default function StockEditor() {
           </tbody>
         </table>
       </div>
-      <p style={{ fontSize: 12, color: '#888', marginTop: 8 }}>
+      <p className="text-xs text-gray-500 mt-2">
         {search
-          ? `${rows.filter((r) => { const q = search.toLowerCase(); return r.sku.toLowerCase().includes(q) || (r.plug_name ?? '').toLowerCase().includes(q); }).length} 件（全 ${rows.length} 件中）`
+          ? `${filteredRows.length} 件（全 ${rows.length} 件中）`
           : `合計 ${rows.length} 件`}
       </p>
     </div>
@@ -247,14 +249,4 @@ export default function StockEditor() {
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleString('ja-JP', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
-}
-
-const card: React.CSSProperties = { border: '1px solid #ddd', borderRadius: 4, padding: 12 };
-const th: React.CSSProperties = { border: '1px solid #ddd', padding: '6px 10px', textAlign: 'left', fontWeight: 600 };
-const td: React.CSSProperties = { padding: '6px 10px', verticalAlign: 'middle' };
-const inp: React.CSSProperties = { padding: '5px 8px', border: '1px solid #bbb', borderRadius: 3, fontSize: 13, background: '#fff', color: '#000', minWidth: 160, boxSizing: 'border-box' };
-const btnPrimary: React.CSSProperties = { padding: '6px 16px', background: '#0070f3', color: '#fff', border: 0, borderRadius: 3, cursor: 'pointer', fontSize: 13 };
-const btnSmall: React.CSSProperties = { padding: '3px 10px', background: '#fff', color: '#333', border: '1px solid #ccc', borderRadius: 3, cursor: 'pointer', fontSize: 12 };
-function msgStyle(bg: string, border: string, color: string): React.CSSProperties {
-  return { background: bg, border: `1px solid ${border}`, color, borderRadius: 4, padding: '8px 12px', marginBottom: 12, fontSize: 13 };
 }
