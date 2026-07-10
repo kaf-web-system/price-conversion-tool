@@ -43,6 +43,12 @@ export type CalcResult = {
   manualReason: string | null;
   /** プラグ型番だけマッチ、ケーブル単価が0のルールで計算した場合に true */
   cableRateUnregistered: boolean;
+  /** ケーブル加算額 = lengthM × cablePerMeter × pieces（ケーブルなし・長さなしは0） */
+  cableAdd: number;
+  /** プラグ加算額 = pieces × Σ(マッチした各プラグのplugPerPiece)（プラグなしは0） */
+  plugAdd: number;
+  /** マッチした全プラグルールのlabelを"+"で連結した文字列（なしは空文字） */
+  plugLabels: string;
 };
 
 /** "(4m)" "(25cm)" "(1.5m)" 等から長さ(m)を抽出 */
@@ -167,6 +173,9 @@ export function calculatePrice(row: AmazonRow, rules: KeywordRule[], plugExtraTe
     pieces: null,
     manualReason: null,
     cableRateUnregistered: false,
+    cableAdd: 0,
+    plugAdd: 0,
+    plugLabels: '',
   };
 
   if (!row.currentPrice || row.currentPrice <= 0) {
@@ -224,5 +233,8 @@ export function calculatePrice(row: AmazonRow, rules: KeywordRule[], plugExtraTe
     lengthM,
     pieces,
     cableRateUnregistered,
+    cableAdd,
+    plugAdd,
+    plugLabels: plugRules.map((r) => r.label).join('+'),
   };
 }

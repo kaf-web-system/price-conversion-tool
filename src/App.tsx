@@ -209,6 +209,31 @@ export default function App() {
     dl('manual_review_list.csv', lines.join('\n'));
   };
 
+  const downloadCheck = () => {
+    if (!data) return;
+    const lines = ['sku,asin,商品名,現在価格,改定後価格,差額,マッチ,長さm,個数,ケーブル加算,プラグ加算,プラグ内訳,手動対応理由,ケーブル単価未登録'];
+    for (const r of data.results) {
+      const isAuto = r.newPrice !== null;
+      lines.push([
+        csvEscape(r.sku),
+        csvEscape(r.asin),
+        csvEscape(r.productName),
+        r.currentPrice,
+        isAuto ? r.newPrice! : '',
+        isAuto ? r.diff! : '',
+        csvEscape(r.matchedRuleLabel ?? ''),
+        r.lengthM ?? '',
+        r.pieces ?? '',
+        isAuto ? r.cableAdd : '',
+        isAuto ? r.plugAdd : '',
+        isAuto ? csvEscape(r.plugLabels) : '',
+        csvEscape(r.manualReason ?? ''),
+        r.cableRateUnregistered ? '1' : '0',
+      ].join(','));
+    }
+    dl('price_check_list.csv', lines.join('\n'));
+  };
+
   const stats = useMemo(() => {
     if (!data) return null;
     const rate = data.total ? Math.round((data.autoCount / data.total) * 1000) / 10 : 0;
@@ -424,14 +449,20 @@ export default function App() {
                     ケーブル単価未登録フラグ: <b>{stats!.cableUnregisteredCount.toLocaleString()}</b> 件
                   </p>
                 )}
-                <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', gap: 12, marginBottom: 8, flexWrap: 'wrap' }}>
                   <button onClick={downloadAuto} style={btnDownloadGreen}>
                     自動改定CSVをダウンロード（{data.autoCount}件）
                   </button>
                   <button onClick={downloadManual} style={btnDownloadOrange}>
                     手動対応リストCSVをダウンロード（{data.manualCount}件）
                   </button>
+                  <button onClick={downloadCheck} style={btnDownloadBlue}>
+                    確認用一覧CSVをダウンロード（全件・根拠つき）
+                  </button>
                 </div>
+                <p style={{ fontSize: 12, color: '#555', margin: '0 0 16px' }}>
+                  先方確認用：元価格と改定後価格、計算根拠（何にマッチしていくら加算したか）の一覧です
+                </p>
                 <h3 style={{ margin: '0 0 8px' }}>プレビュー（先頭50件）</h3>
                 <div style={{ overflow: 'auto', maxHeight: 500, border: '1px solid #ddd' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
@@ -486,6 +517,7 @@ const btnSecondary: React.CSSProperties = { padding: '5px 14px', background: '#f
 const btnDanger: React.CSSProperties = { padding: '3px 10px', background: '#fff', color: '#c00', border: '1px solid #fcc', borderRadius: 3, cursor: 'pointer', fontSize: 12 };
 const btnDownloadGreen: React.CSSProperties = { padding: '10px 22px', fontSize: 15, fontWeight: 700, background: '#047857', color: '#fff', border: 0, borderRadius: 5, cursor: 'pointer', letterSpacing: '0.02em' };
 const btnDownloadOrange: React.CSSProperties = { padding: '10px 22px', fontSize: 15, fontWeight: 700, background: '#b45309', color: '#fff', border: 0, borderRadius: 5, cursor: 'pointer', letterSpacing: '0.02em' };
+const btnDownloadBlue: React.CSSProperties = { padding: '10px 22px', fontSize: 15, fontWeight: 700, background: '#1565c0', color: '#fff', border: 0, borderRadius: 5, cursor: 'pointer', letterSpacing: '0.02em' };
 
 function csvEscape(s: string): string {
   if (s == null) return '';
