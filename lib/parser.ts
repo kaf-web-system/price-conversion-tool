@@ -51,6 +51,8 @@ export type CalcResult = {
   plugLabels: string;
   /** ケーブル・プラグ問わず加算対象にマッチした全ルールのlabelを"+"で連結（なしは空文字） */
   allMatchedLabels: string;
+  /** ケーブルルールのマッチ元: '商品名' / '説明文' / ''(マッチなし) */
+  matchSource: string;
 };
 
 /** "(4m)" "(25cm)" "(1.5m)" 等から長さ(m)を抽出 */
@@ -131,21 +133,27 @@ function deduplicateLongestMatch(rules: KeywordRule[]): KeywordRule[] {
  * ケーブルルール選択（不具合2対応: 商品名優先）。
  * plugPerPiece===0 のルールを対象に、まず productName だけで照合する。
  * マッチがあれば label 最長のものを採用。なければ fullText にフォールバック。
+ * matchSource で商品名マッチかフォールバックかを区別する。
  */
+type CableSelection = {
+  rule: KeywordRule | null;
+  matchSource: string;
+};
+
 function selectCableRule(
   productName: string,
   fullText: string,
   rules: KeywordRule[]
-): KeywordRule | null {
+): CableSelection {
   const candidates = rules.filter((r) => r.plugPerPiece === 0);
 
   const nameHits = matchAllRules(productName, candidates);
-  if (nameHits.length > 0) return longestLabelRule(nameHits);
+  if (nameHits.length > 0) return { rule: longestLabelRule(nameHits), matchSource: '商品名' };
 
   const fullHits = matchAllRules(fullText, candidates);
-  if (fullHits.length > 0) return longestLabelRule(fullHits);
+  if (fullHits.length > 0) return { rule: longestLabelRule(fullHits), matchSource: '説明文' };
 
-  return null;
+  return { rule: null, matchSource: '' };
 }
 
 /**
@@ -179,6 +187,7 @@ export function calculatePrice(row: AmazonRow, rules: KeywordRule[], plugExtraTe
     plugAdd: 0,
     plugLabels: '',
     allMatchedLabels: '',
+    matchSource: '',
   };
 
   if (!row.currentPrice || row.currentPrice <= 0) {
@@ -200,7 +209,9 @@ export function calculatePrice(row: AmazonRow, rules: KeywordRule[], plugExtraTe
   const plugMatchText = plugExtraText ? `${matchText} ${plugExtraText}` : matchText;
 
   // 不具合2修正: ケーブルは商品名優先、不具合1修正: プラグは最長一致で重複除去
-  const cableRule = selectCableRule(row.productName, matchText, rules);
+  const cableSelection = selectCableRule(row.productName, matchText, rules);
+  const cableRule = cableSelection.rule;
+  const { matchSource } = cableSelection;
   const plugRules = selectPlugRules(plugMatchText, rules);
 
   if (!cableRule && plugRules.length === 0) {
@@ -210,6 +221,21 @@ export function calculatePrice(row: AmazonRow, rules: KeywordRule[], plugExtraTe
   const lengthM = extractLengthFromRow(row);
   const pieces = extractPieces(row.productName);
 
+  // 徳山様指摘対応: 説明文のみでマッチしたケーブル（単価>0）は自動改定せず手動対応
+  if (cableRule !== null && matchSource === '説明文' && cableRule.cablePerMeter > 0) {
+    const allLabels = [cableRule.label, ...plugRules.map((r) => r.label)].join('+');
+    return {
+      ...base,
+      matchedRuleLabel: cableRule.label,
+      allMatchedLabels: allLabels,
+      lengthM,
+      pieces,
+      plugLabels: plugRules.map((r) => r.label).join('+'),
+      matchSource,
+      manualReason: 'ケーブルが説明文のみマッチ（比較記載の可能性・要確認）',
+    };
+  }
+
   // 長さが取れない & ケーブル加算がある場合は手動送り
   if (lengthM === null && (cableRule?.cablePerMeter ?? 0) > 0) {
     const allLabels = [cableRule!.label, ...plugRules.map((r) => r.label)].join('+');
@@ -218,6 +244,7 @@ export function calculatePrice(row: AmazonRow, rules: KeywordRule[], plugExtraTe
       matchedRuleLabel: cableRule!.label,
       allMatchedLabels: allLabels,
       pieces,
+      matchSource,
       manualReason: '長さが読み取れない',
     };
   }
@@ -242,5 +269,6 @@ export function calculatePrice(row: AmazonRow, rules: KeywordRule[], plugExtraTe
     plugAdd,
     plugLabels: plugRules.map((r) => r.label).join('+'),
     allMatchedLabels: [cableRule?.label, ...plugRules.map((r) => r.label)].filter(Boolean).join('+'),
+    matchSource,
   };
 }
