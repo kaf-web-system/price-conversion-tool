@@ -6,6 +6,8 @@ export type ShopifyRow = {
   currentPrice: number;
   status: string;
   titleWasFilled: boolean;
+  /** rawRows 配列におけるこのバリアント行のインデックス（0=ヘッダー、1〜=データ行） */
+  rowIndex: number;
 };
 
 export type ShopifyParseResult = {
@@ -14,6 +16,8 @@ export type ShopifyParseResult = {
   skipNoPrice: number;   // Handle あり・Price 空または 0 以下
   skipNoTitle: number;   // Handle あり・補完後も Title 空
   skipStatus: number;    // Handle あり・activeOnly でStatus除外
+  /** パース済みの全CSV行（ヘッダー＋全データ行）。インポート用CSV再シリアライズに使用 */
+  rawRows: string[][];
 };
 
 // ─── CSV parser ──────────────────────────────────────────────────────────────
@@ -137,7 +141,7 @@ export function parseShopifyCsv(text: string, activeOnly: boolean): ShopifyParse
   // ① Remove BOM, parse entire CSV in one stream pass
   const clean = text.startsWith('\uFEFF') ? text.slice(1) : text;
   const allRows = parseCsv(clean);
-  if (allRows.length < 2) return { rows: [], totalRaw: 0, skipNoPrice: 0, skipNoTitle: 0, skipStatus: 0 };
+  if (allRows.length < 2) return { rows: [], totalRaw: 0, skipNoPrice: 0, skipNoTitle: 0, skipStatus: 0, rawRows: allRows };
 
   const header = allRows[0];
   const col = (name: string) =>
@@ -153,11 +157,12 @@ export function parseShopifyCsv(text: string, activeOnly: boolean): ShopifyParse
   const iOpt3   = col('Option3 Value');
 
   if (iHandle === -1) {
-    return { rows: [], totalRaw: 0, skipNoPrice: 0, skipNoTitle: 0, skipStatus: 0 };
+    return { rows: [], totalRaw: 0, skipNoPrice: 0, skipNoTitle: 0, skipStatus: 0, rawRows: allRows };
   }
 
   // ② Forward-fill: collect raw data per row, then fill Title/Status per Handle group
   type RawEntry = {
+    rowIndex: number;
     handle: string;
     rawTitle: string;
     rawStatus: string;
@@ -177,14 +182,15 @@ export function parseShopifyCsv(text: string, activeOnly: boolean): ShopifyParse
     if (!handle) continue;
 
     entries.push({
+      rowIndex: i,
       handle,
       rawTitle:  iTitle  < cols.length ? cols[iTitle].trim()  : '',
       rawStatus: iStatus < cols.length ? cols[iStatus].trim() : '',
       sku:       iSku    < cols.length ? cols[iSku].trim()    : '',
       priceStr:  iPrice  < cols.length ? cols[iPrice].trim()  : '',
-      opt1:      iOpt1   < cols.length ? cols[iOpt1].trim()   : '',
-      opt2:      iOpt2   < cols.length ? cols[iOpt2].trim()   : '',
-      opt3:      iOpt3   < cols.length ? cols[iOpt3].trim()   : '',
+      opt1:      iOpt1 >= 0 && iOpt1 < cols.length ? cols[iOpt1].trim() : '',
+      opt2:      iOpt2 >= 0 && iOpt2 < cols.length ? cols[iOpt2].trim() : '',
+      opt3:      iOpt3 >= 0 && iOpt3 < cols.length ? cols[iOpt3].trim() : '',
     });
   }
 
@@ -238,8 +244,9 @@ export function parseShopifyCsv(text: string, activeOnly: boolean): ShopifyParse
       currentPrice:     price,
       status:           e.status,
       titleWasFilled:   e.titleWasFilled,
+      rowIndex:         e.rowIndex,
     });
   }
 
-  return { rows, totalRaw, skipNoPrice, skipNoTitle, skipStatus };
+  return { rows, totalRaw, skipNoPrice, skipNoTitle, skipStatus, rawRows: allRows };
 }

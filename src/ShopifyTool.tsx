@@ -3,8 +3,9 @@ import { parseShopifyCsv } from '../lib/shopifyParser';
 import type { ShopifyParseResult, ShopifyRow } from '../lib/shopifyParser';
 import { calculatePrice } from '../lib/parser';
 import type { AmazonRow, CalcResult, KeywordRule } from '../lib/parser';
+import { serializeCsv } from '../lib/csvSerializer';
 
-type ShopifyResult = CalcResult & { handle: string; originalTitle: string };
+type ShopifyResult = CalcResult & { handle: string; originalTitle: string; rowIndex: number };
 
 interface Props {
   rules: KeywordRule[];
@@ -36,6 +37,7 @@ export default function ShopifyTool({ rules, rulesSection }: Props) {
   const [inventoryMsg, setInventoryMsg] = useState<string | null>(null);
   const [results, setResults]        = useState<ShopifyResult[] | null>(null);
   const [parseInfo, setParseInfo]    = useState<Omit<ShopifyParseResult, 'rows'> | null>(null);
+  const [rawRows, setRawRows]        = useState<string[][] | null>(null);
 
   const autoResults   = results?.filter((r) => r.newPrice !== null) ?? [];
   const manualResults = results?.filter((r) => r.newPrice === null) ?? [];
@@ -56,13 +58,15 @@ export default function ShopifyTool({ rules, rulesSection }: Props) {
     setInventoryMsg(null);
     setResults(null);
     setParseInfo(null);
+    setRawRows(null);
     setLoading(true);
     await new Promise((r) => setTimeout(r, 30));
 
     try {
       const text = await file.text();
-      const { rows: shopifyRows, totalRaw, skipNoPrice, skipNoTitle, skipStatus } = parseShopifyCsv(text, activeOnly);
+      const { rows: shopifyRows, totalRaw, skipNoPrice, skipNoTitle, skipStatus, rawRows: parsedRawRows } = parseShopifyCsv(text, activeOnly);
       setParseInfo({ totalRaw, skipNoPrice, skipNoTitle, skipStatus });
+      setRawRows(parsedRawRows);
 
       if (shopifyRows.length === 0) {
         setError(
@@ -107,7 +111,7 @@ export default function ShopifyTool({ rules, rulesSection }: Props) {
           raw: {},
         };
         const calc: CalcResult = calculatePrice(amazonRow, rules, inventoryMap.get(sr.sku) ?? '');
-        return { ...calc, handle: sr.handle, originalTitle: sr.originalTitle };
+        return { ...calc, handle: sr.handle, originalTitle: sr.originalTitle, rowIndex: sr.rowIndex };
       });
 
       setResults(computed);
@@ -135,6 +139,66 @@ export default function ShopifyTool({ rules, rulesSection }: Props) {
     }
     download('shopify_manual_review.csv', lines.join('\n'));
   };
+
+  const downloadImportCsv = () => {
+    if (!results || !rawRows) return;
+    const header = rawRows[0];
+    const iPrice = header.indexOf('Variant Price');
+    if (iPrice === -1) return;
+    const iHandle = header.indexOf('Handle');
+    if (iHandle === -1) return;
+
+    // 1. 価格置換対象のHandle集合を構築
+    const targetHandles = new Set<string>();
+    const priceByRowIndex = new Map<number, number>();
+    for (const r of results) {
+      if (r.newPrice === null) continue;
+      targetHandles.add(r.handle);
+      priceByRowIndex.set(r.rowIndex, r.newPrice);
+    }
+
+    // 2. rawRowsを前方補完しながらHandle単位で絞り込み
+    const out: string[][] = [header];
+    let currentHandle = '';
+    for (let i = 1; i < rawRows.length; i++) {
+      const row = rawRows[i].slice();
+      // 空行スキップ
+      if (row.length === 1 && row[0] === '') continue;
+      // Handle前方補完
+      const rawHandle = iHandle < row.length ? row[iHandle].trim() : '';
+      if (rawHandle) currentHandle = rawHandle;
+      // 対象Handleのみ出力
+      if (!targetHandles.has(currentHandle)) continue;
+      while (row.length < header.length) row.push('');
+      // 価格置換
+      if (priceByRowIndex.has(i) && iPrice < row.length) {
+        row[iPrice] = String(priceByRowIndex.get(i)!);
+      }
+      out.push(row);
+    }
+    download('shopify_import_price_updated.csv', serializeCsv(out));
+  };
+
+  const importReplacedCount = results ? results.filter((r) => r.newPrice !== null).length : 0;
+  const importTargetHandles = results ? new Set(results.filter((r) => r.newPrice !== null).map((r) => r.handle)) : new Set<string>();
+  const importTargetHandleCount = importTargetHandles.size;
+
+  // 出力CSVの行数（ヘッダー + 対象Handleの全行）を計算
+  const importOutputRowCount = (() => {
+    if (!results || !rawRows || importTargetHandleCount === 0) return 0;
+    const iHandle = rawRows[0].indexOf('Handle');
+    if (iHandle === -1) return 0;
+    let count = 1; // header
+    let currentHandle = '';
+    for (let i = 1; i < rawRows.length; i++) {
+      const row = rawRows[i];
+      if (row.length === 1 && row[0] === '') continue;
+      const rawHandle = iHandle < row.length ? row[iHandle].trim() : '';
+      if (rawHandle) currentHandle = rawHandle;
+      if (importTargetHandles.has(currentHandle)) count++;
+    }
+    return count;
+  })();
 
   const preview = results?.slice(0, 50) ?? [];
 
@@ -259,6 +323,13 @@ export default function ShopifyTool({ rules, rulesSection }: Props) {
             <button onClick={downloadManual} disabled={manualResults.length === 0} className="px-5 py-2.5 text-[15px] font-bold bg-amber-700 text-white border-0 rounded cursor-pointer tracking-wide disabled:opacity-50">
               手動対応リストCSVをダウンロード（{manualResults.length}件）
             </button>
+          </div>
+
+          <div className="flex gap-3 mb-4 flex-wrap items-center">
+            <button onClick={downloadImportCsv} disabled={importReplacedCount === 0} className="px-5 py-2.5 text-[15px] font-bold bg-blue-700 text-white border-0 rounded cursor-pointer tracking-wide disabled:opacity-50">
+              Shopifyインポート用CSVをダウンロード
+            </button>
+            <span className="text-sm text-gray-700">価格を置換した行数：{importReplacedCount}行（対象商品{importTargetHandleCount}件・出力{importOutputRowCount}行）</span>
           </div>
 
           <h3 className="mb-2">プレビュー（先頭50件）</h3>
