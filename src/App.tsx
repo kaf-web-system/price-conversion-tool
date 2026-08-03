@@ -64,8 +64,13 @@ export default function App() {
       { id: String(Date.now()), label: '', pattern: '', cablePerMeter: 0, plugPerPiece: 0 },
     ]);
 
-  const removeRule = (i: number) =>
+  const removeRule = (i: number) => {
+    const r = rules[i];
+    if (!r) return;
+    const name = r.label || r.pattern || '（名称未設定）';
+    if (!window.confirm(`このルールを削除しますか？（対象の型番名: ${name}）`)) return;
     setRules((rs) => rs.filter((_, idx) => idx !== i));
+  };
 
   const clearAllRules = () => {
     if (window.confirm(`ルールを全件（${rules.length}件）削除しますか？この操作は元に戻せません。`)) {
