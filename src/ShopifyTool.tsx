@@ -229,28 +229,11 @@ export default function ShopifyTool({ rules, rulesSection }: Props) {
       {/* 2. キーワード設定（App.tsx から渡されたノード） */}
       {rulesSection}
 
-      {/* 3. 実行 */}
-      <section className="border border-gray-300 rounded-md p-4 mt-4">
-        <h2>3. 実行</h2>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={onRun}
-            disabled={loading}
-            className={`px-7 py-2.5 text-base font-semibold border-0 rounded text-white tracking-wide ${
-              loading ? 'bg-gray-400 cursor-wait' : 'bg-[#0070f3] cursor-pointer'
-            }`}
-          >
-            {loading ? '計算中...' : '価格改定を実行'}
-          </button>
-          <span className="px-3 py-1 text-sm font-bold text-white rounded bg-[#95BF47]">Shopify</span>
+      {error && (
+        <div className="text-red-700 mt-4 px-3.5 py-2.5 bg-red-50 border border-red-200 rounded text-sm">
+          <b>エラー:</b> {error}
         </div>
-
-        {error && (
-          <div className="text-red-700 mt-3 px-3.5 py-2.5 bg-red-50 border border-red-200 rounded text-sm">
-            <b>エラー:</b> {error}
-          </div>
-        )}
-      </section>
+      )}
 
       {/* 診断パネル */}
       {(parseInfo !== null || inventoryMsg !== null) && (
@@ -373,6 +356,21 @@ export default function ShopifyTool({ rules, rulesSection }: Props) {
           </div>
         </section>
       )}
+      <div className="fixed bottom-6 right-6 z-50">
+        <div className="bg-white border border-gray-300 rounded-lg shadow-xl px-5 py-4 flex items-center gap-3">
+          <button
+            onClick={onRun}
+            disabled={loading}
+            className={`px-7 py-2.5 text-base font-semibold border-0 rounded text-white tracking-wide ${
+              loading ? 'bg-gray-400 cursor-wait' : 'bg-[#0070f3] cursor-pointer'
+            }`}
+          >
+            {loading ? '計算中...' : '価格改定を実行'}
+          </button>
+          <span className="px-3 py-1 text-sm font-bold text-white rounded bg-[#95BF47]">Shopify</span>
+        </div>
+      </div>
+      <div className="h-24" />
     </div>
   );
 }

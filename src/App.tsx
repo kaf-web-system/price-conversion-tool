@@ -49,6 +49,7 @@ export default function App() {
   const [data, setData]           = useState<ProcessedData | null>(null);
   const [ruleLoadMsg, setRuleLoadMsg] = useState<string | null>(null);
   const [inventoryMsg, setInventoryMsg] = useState<string | null>(null);
+  const [rulesCollapsed, setRulesCollapsed] = useState(true);
   const ruleFileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -251,64 +252,77 @@ export default function App() {
   }, [data]);
 
   const rulesSection = (
-    <section className="border border-gray-300 rounded-md p-4 mt-4">
-      <h2>2. キーワードと加算額を設定</h2>
-      <div className="flex items-center gap-2.5 mb-2.5 px-3 py-2 bg-[#f5f8ff] border border-[#c8d8f0] rounded flex-wrap">
-        <span className="text-[13px] text-gray-600 whitespace-nowrap">値上げルール表を読み込む（.txt / .csv）:</span>
-        <input
-          ref={ruleFileRef}
-          type="file"
-          accept=".txt,.csv,text/plain,text/csv"
-          className="text-[13px]"
-          onChange={onRuleFileChange}
-        />
-        {ruleLoadMsg && (
-          <span className={`text-xs ${ruleLoadMsg.startsWith('読み込みエラー') || ruleLoadMsg.startsWith('警告') ? 'text-red-600' : 'text-green-700'}`}>
-            {ruleLoadMsg}
-          </span>
-        )}
-      </div>
-      <p className="text-gray-500 text-[13px] mb-2.5">
-        パターンは正規表現で書けます（例: <code>MOGAMI\s*2534</code>）。先に書いたルールから順に判定し、最初にマッチしたものが採用されます。
-        マッチ対象は「商品名＋商品説明＋商品の仕様#1〜#5」の連結テキストです。1m単価が0のルールにマッチした商品は「ケーブル単価未登録」フラグが立ちます。
-      </p>
-      <table className="w-full border-collapse text-sm">
-        <thead>
-          <tr className="bg-gray-100">
-            <th className="border border-gray-300 px-2 py-1.5 text-left">表示名</th>
-            <th className="border border-gray-300 px-2 py-1.5 text-left">正規表現パターン</th>
-            <th className="border border-gray-300 px-2 py-1.5 text-left">1m単価（円）</th>
-            <th className="border border-gray-300 px-2 py-1.5 text-left">プラグ単価（円）</th>
-            <th className="border border-gray-300 px-2 py-1.5 text-left"></th>
-          </tr>
-        </thead>
-        <tbody>
-          {rules.map((r, i) => (
-            <tr key={r.id}>
-              <td className="border border-gray-200 px-2 py-1 align-top">
-                <input className="w-full px-1.5 py-1 bg-white text-black border border-gray-400 rounded box-border" value={r.label} onChange={(e) => updateRule(i, { label: e.target.value })} />
-              </td>
-              <td className="border border-gray-200 px-2 py-1 align-top">
-                <input className="w-full px-1.5 py-1 bg-white text-black border border-gray-400 rounded box-border" value={r.pattern} onChange={(e) => updateRule(i, { pattern: e.target.value })} />
-              </td>
-              <td className="border border-gray-200 px-2 py-1 align-top">
-                <input type="number" className="w-full px-1.5 py-1 bg-white text-black border border-gray-400 rounded box-border" value={r.cablePerMeter} onChange={(e) => updateRule(i, { cablePerMeter: Number(e.target.value) })} />
-              </td>
-              <td className="border border-gray-200 px-2 py-1 align-top">
-                <input type="number" className="w-full px-1.5 py-1 bg-white text-black border border-gray-400 rounded box-border" value={r.plugPerPiece} onChange={(e) => updateRule(i, { plugPerPiece: Number(e.target.value) })} />
-              </td>
-              <td className="border border-gray-200 px-2 py-1 align-top">
-                <button onClick={() => removeRule(i)} className="px-2.5 py-0.5 bg-white text-red-600 border border-red-200 rounded cursor-pointer text-xs">削除</button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <div className="flex gap-2 mt-2.5 items-center">
-        <button onClick={addRule} className="px-3.5 py-1 bg-white text-gray-700 border border-gray-300 rounded cursor-pointer text-sm">＋ ルール追加</button>
-        <button onClick={clearAllRules} className="px-3.5 py-1 bg-white text-red-600 border border-red-200 rounded cursor-pointer text-sm">全クリア</button>
-        <span className="text-xs text-gray-400 ml-1">ルールは自動保存されます（{rules.length}件）</span>
-      </div>
+    <section className="border border-gray-300 rounded-md mt-4 overflow-hidden">
+      <button
+        onClick={() => setRulesCollapsed((v) => !v)}
+        className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 border-0 cursor-pointer text-left hover:bg-gray-100 transition-colors"
+      >
+        <span className="font-semibold text-sm">
+          2. キーワードと加算額を設定
+          <span className="ml-2 text-gray-500 font-normal">（{rules.length}件）</span>
+        </span>
+        <span className="text-gray-500 text-xs select-none">{rulesCollapsed ? '\u25BC 開く' : '\u25B2 閉じる'}</span>
+      </button>
+      {!rulesCollapsed && (
+        <div className="p-4">
+          <div className="flex items-center gap-2.5 mb-2.5 px-3 py-2 bg-[#f5f8ff] border border-[#c8d8f0] rounded flex-wrap">
+            <span className="text-[13px] text-gray-600 whitespace-nowrap">値上げルール表を読み込む（.txt / .csv）:</span>
+            <input
+              ref={ruleFileRef}
+              type="file"
+              accept=".txt,.csv,text/plain,text/csv"
+              className="text-[13px]"
+              onChange={onRuleFileChange}
+            />
+            {ruleLoadMsg && (
+              <span className={`text-xs ${ruleLoadMsg.startsWith('読み込みエラー') || ruleLoadMsg.startsWith('警告') ? 'text-red-600' : 'text-green-700'}`}>
+                {ruleLoadMsg}
+              </span>
+            )}
+          </div>
+          <p className="text-gray-500 text-[13px] mb-2.5">
+            パターンは正規表現で書けます（例: <code>MOGAMI\s*2534</code>）。先に書いたルールから順に判定し、最初にマッチしたものが採用されます。
+            マッチ対象は「商品名＋商品説明＋商品の仕様#1〜#5」の連結テキストです。1m単価が0のルールにマッチした商品は「ケーブル単価未登録」フラグが立ちます。
+          </p>
+          <table className="w-full border-collapse text-sm">
+            <thead>
+              <tr className="bg-gray-100">
+                <th className="border border-gray-300 px-2 py-1.5 text-left">表示名</th>
+                <th className="border border-gray-300 px-2 py-1.5 text-left">正規表現パターン</th>
+                <th className="border border-gray-300 px-2 py-1.5 text-left">1m単価（円）</th>
+                <th className="border border-gray-300 px-2 py-1.5 text-left">プラグ単価（円）</th>
+                <th className="border border-gray-300 px-2 py-1.5 text-left"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {rules.map((r, i) => (
+                <tr key={r.id}>
+                  <td className="border border-gray-200 px-2 py-1 align-top">
+                    <input className="w-full px-1.5 py-1 bg-white text-black border border-gray-400 rounded box-border" value={r.label} onChange={(e) => updateRule(i, { label: e.target.value })} />
+                  </td>
+                  <td className="border border-gray-200 px-2 py-1 align-top">
+                    <input className="w-full px-1.5 py-1 bg-white text-black border border-gray-400 rounded box-border" value={r.pattern} onChange={(e) => updateRule(i, { pattern: e.target.value })} />
+                  </td>
+                  <td className="border border-gray-200 px-2 py-1 align-top">
+                    <input type="number" className="w-full px-1.5 py-1 bg-white text-black border border-gray-400 rounded box-border" value={r.cablePerMeter} onChange={(e) => updateRule(i, { cablePerMeter: Number(e.target.value) })} />
+                  </td>
+                  <td className="border border-gray-200 px-2 py-1 align-top">
+                    <input type="number" className="w-full px-1.5 py-1 bg-white text-black border border-gray-400 rounded box-border" value={r.plugPerPiece} onChange={(e) => updateRule(i, { plugPerPiece: Number(e.target.value) })} />
+                  </td>
+                  <td className="border border-gray-200 px-2 py-1 align-top">
+                    <button onClick={() => removeRule(i)} className="px-2.5 py-0.5 bg-white text-red-600 border border-red-200 rounded cursor-pointer text-xs">削除</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="flex gap-2 mt-2.5 items-center">
+            <button onClick={addRule} className="px-3.5 py-1 bg-white text-gray-700 border border-gray-300 rounded cursor-pointer text-sm">＋ ルール追加</button>
+            <button onClick={clearAllRules} className="px-3.5 py-1 bg-white text-red-600 border border-red-200 rounded cursor-pointer text-sm">全クリア</button>
+            <span className="text-xs text-gray-400 ml-1">ルールは自動保存されます（{rules.length}件）</span>
+          </div>
+        </div>
+      )}
     </section>
   );
 
@@ -400,32 +414,16 @@ export default function App() {
 
             {rulesSection}
 
-            <section className="border border-gray-300 rounded-md p-4 mt-4">
-              <h2>3. 実行</h2>
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={onSubmit}
-                  disabled={loading}
-                  className={`px-7 py-2.5 text-base font-semibold border-0 rounded text-white tracking-wide ${
-                    loading ? 'bg-gray-400 cursor-wait' : 'bg-[#0070f3] cursor-pointer'
-                  }`}
-                >
-                  {loading ? '計算中（ブラウザ内処理）...' : '価格改定を実行'}
-                </button>
-                <span className="px-3 py-1 text-sm font-bold text-white rounded bg-[#FF9900]">Amazon</span>
+            {error && (
+              <div className="text-red-700 mt-4 px-3.5 py-2.5 bg-red-50 border border-red-200 rounded text-sm whitespace-pre-wrap">
+                <b>エラー:</b> {error}
               </div>
-
-              {error && (
-                <div className="text-red-700 mt-3 px-3.5 py-2.5 bg-red-50 border border-red-200 rounded text-sm whitespace-pre-wrap">
-                  <b>エラー:</b> {error}
-                </div>
-              )}
-              {warnings.length > 0 && (
-                <div className="text-amber-700 mt-3 px-3.5 py-2.5 bg-amber-50 border border-amber-300 rounded text-[13px] whitespace-pre-wrap">
-                  <b>警告（一部ファイルを読み飛ばし）:</b>{'\n'}{warnings.join('\n')}
-                </div>
-              )}
-            </section>
+            )}
+            {warnings.length > 0 && (
+              <div className="text-amber-700 mt-3 px-3.5 py-2.5 bg-amber-50 border border-amber-300 rounded text-[13px] whitespace-pre-wrap">
+                <b>警告（一部ファイルを読み飛ばし）:</b>{'\n'}{warnings.join('\n')}
+              </div>
+            )}
 
             {(diagInfos.length > 0 || inventoryMsg !== null) && (
               <section className="border border-gray-300 rounded-md p-4 mt-4">
@@ -562,6 +560,24 @@ export default function App() {
           </>)}
 
           {platform === 'shopify' && <ShopifyTool rules={rules} rulesSection={rulesSection} />}
+
+          {platform === 'amazon' && (
+            <div className="fixed bottom-6 right-6 z-50">
+              <div className="bg-white border border-gray-300 rounded-lg shadow-xl px-5 py-4 flex items-center gap-3">
+                <button
+                  onClick={onSubmit}
+                  disabled={loading}
+                  className={`px-7 py-2.5 text-base font-semibold border-0 rounded text-white tracking-wide ${
+                    loading ? 'bg-gray-400 cursor-wait' : 'bg-[#0070f3] cursor-pointer'
+                  }`}
+                >
+                  {loading ? '計算中...' : '価格改定を実行'}
+                </button>
+                <span className="px-3 py-1 text-sm font-bold text-white rounded bg-[#FF9900]">Amazon</span>
+              </div>
+            </div>
+          )}
+          <div className="h-24" />
         </>
       )}
     </main>
