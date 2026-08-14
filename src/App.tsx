@@ -37,7 +37,13 @@ function loadRulesFromStorage(): KeywordRule[] {
 }
 
 export default function App() {
-  const [tab, setTab] = useState<Tab>('price');
+  const [tab, setTab] = useState<Tab>(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.has('zaikodb')) return 'stock';
+    } catch { /* ignore */ }
+    return 'price';
+  });
   const [platform, setPlatform] = useState<Platform>('amazon');
   const [files, setFiles]         = useState<File[]>([]);
   const [rules, setRules]         = useState<KeywordRule[]>(loadRulesFromStorage);
