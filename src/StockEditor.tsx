@@ -6,6 +6,7 @@ type StockRow = {
   sku: string;
   plug_name: string | null;
   current_price: number | null;
+  updated_at: string;
   created_at: string;
 };
 
@@ -62,7 +63,7 @@ export default function StockEditor() {
 
   // Build the base query path with optional search filter
   const buildQuery = (searchTerm: string): string => {
-    const select = 'select=id,sku,plug_name,current_price,created_at&order=created_at.asc';
+    const select = 'select=id,sku,plug_name,current_price,updated_at,created_at&order=updated_at.desc';
     if (!searchTerm.trim()) return `stock?${select}`;
     const q = encodeURIComponent(`%${searchTerm.trim()}%`);
     return `stock?or=(sku.ilike.${q},plug_name.ilike.${q})&${select}`;
@@ -154,7 +155,7 @@ export default function StockEditor() {
       await apiFetch('stock', {
         method: 'POST',
         headers: { Prefer: 'return=representation,resolution=merge-duplicates' },
-        body: JSON.stringify({ sku, plug_name: plug_name || null, current_price: priceNum }),
+        body: JSON.stringify({ sku, plug_name: plug_name || null, current_price: priceNum, updated_at: new Date().toISOString() }),
       });
       setDraft(EMPTY_DRAFT);
       notify('追加しました');
@@ -181,7 +182,7 @@ export default function StockEditor() {
     try {
       await apiFetch(`stock?id=eq.${id}`, {
         method: 'PATCH',
-        body: JSON.stringify({ sku, plug_name: plug_name || null, current_price: priceNum }),
+        body: JSON.stringify({ sku, plug_name: plug_name || null, current_price: priceNum, updated_at: new Date().toISOString() }),
       });
       cancelEdit();
       notify('更新しました');
@@ -237,7 +238,7 @@ export default function StockEditor() {
         return;
       }
 
-      const upsertRows = Array.from(seen.values());
+      const upsertRows = Array.from(seen.values()).map((r) => ({ ...r, updated_at: new Date().toISOString() }));
       if (upsertRows.length === 0) { setImportError('SKU が取得できる行がありませんでした。'); return; }
 
       const resp = await apiFetch('stock', {
@@ -281,7 +282,7 @@ export default function StockEditor() {
   for (let p = startPage; p <= endPage; p++) pageNumbers.push(p);
 
   return (
-    <div className="max-w-[860px] mx-auto p-6 font-sans text-black">
+    <div className="mx-auto px-6 py-6 font-sans text-black" style={{ maxWidth: '100vw' }}>
       <h2 className="mt-0">在庫DB（stock）編集</h2>
       <p className="text-gray-600 text-[13px] mb-4">
         SKU と プラグ型番（plug_name）、現在価格（current_price）の対応を管理します。
@@ -391,16 +392,17 @@ export default function StockEditor() {
               <th className="border border-gray-300 px-2.5 py-1.5 text-left font-semibold">SKU</th>
               <th className="border border-gray-300 px-2.5 py-1.5 text-left font-semibold">plug_name</th>
               <th className="border border-gray-300 px-2.5 py-1.5 text-right font-semibold">現在価格</th>
+              <th className="border border-gray-300 px-2.5 py-1.5 text-left font-semibold">更新日時</th>
               <th className="border border-gray-300 px-2.5 py-1.5 text-left font-semibold">登録日時</th>
               <th className="border border-gray-300 px-2.5 py-1.5 text-left font-semibold w-[120px]">操作</th>
             </tr>
           </thead>
           <tbody>
             {loading && (
-              <tr><td colSpan={5} className="p-4 text-center text-gray-500">読み込み中...</td></tr>
+              <tr><td colSpan={6} className="p-4 text-center text-gray-500">読み込み中...</td></tr>
             )}
             {!loading && totalCount === 0 && (
-              <tr><td colSpan={5} className="p-4 text-center text-gray-500">データがありません</td></tr>
+              <tr><td colSpan={6} className="p-4 text-center text-gray-500">データがありません</td></tr>
             )}
             {pageRows.map((row) =>
               editId === row.id ? (
@@ -426,6 +428,7 @@ export default function StockEditor() {
                       className="px-2 py-1 border border-gray-400 rounded text-[13px] bg-white text-black w-full box-border text-right"
                     />
                   </td>
+                  <td className="px-2.5 py-1.5 align-middle text-gray-400 text-[11px]">{formatDate(row.updated_at)}</td>
                   <td className="px-2.5 py-1.5 align-middle text-gray-300 text-[11px]">{formatDate(row.created_at)}</td>
                   <td className="px-2.5 py-1.5 align-middle">
                     <button onClick={() => handleSave(row.id)} className="px-2.5 py-0.5 bg-[#0070f3] text-white border-0 rounded cursor-pointer text-xs mr-1">保存</button>
@@ -439,6 +442,7 @@ export default function StockEditor() {
                   <td className={`px-2.5 py-1.5 align-middle text-right ${row.current_price != null ? 'text-black' : 'text-gray-300'}`}>
                     {row.current_price != null ? row.current_price.toLocaleString() : '（未設定）'}
                   </td>
+                  <td className="px-2.5 py-1.5 align-middle text-gray-500 text-[11px]">{formatDate(row.updated_at)}</td>
                   <td className="px-2.5 py-1.5 align-middle text-gray-500 text-[11px]">{formatDate(row.created_at)}</td>
                   <td className="px-2.5 py-1.5 align-middle">
                     <button onClick={() => startEdit(row)} className="px-2.5 py-0.5 bg-white text-gray-700 border border-gray-300 rounded cursor-pointer text-xs mr-1">編集</button>
@@ -448,7 +452,7 @@ export default function StockEditor() {
               )
             )}
             {fetchingMore && (
-              <tr><td colSpan={5} className="p-2 text-center text-gray-400 text-[12px]">追加データを読み込み中...</td></tr>
+              <tr><td colSpan={6} className="p-2 text-center text-gray-400 text-[12px]">追加データを読み込み中...</td></tr>
             )}
           </tbody>
         </table>
