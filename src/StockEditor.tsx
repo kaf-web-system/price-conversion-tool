@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { parseFile } from './fileParser';
 import { collectStockUpsertRows, toUpsertBatches } from '../lib/stockImport';
+import { DEFAULT_STOCK_SORT, buildStockOrder, nextStockSort, sortStockRows } from '../lib/stockSort';
+import type { StockSortKey, StockSortState } from '../lib/stockSort';
 import type { AmazonRow } from '../lib/parser';
 
 type StockRow = {
@@ -58,6 +60,7 @@ export default function StockEditor() {
   const [editId, setEditId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<DraftRow>(EMPTY_DRAFT);
   const [page, setPage] = useState(1);
+  const [sort, setSort] = useState<StockSortState>(DEFAULT_STOCK_SORT);
 
   const notify = (msg: string) => {
     setSuccess(msg);
@@ -65,8 +68,9 @@ export default function StockEditor() {
   };
 
   // Build the base query path with optional search filter
-  const buildQuery = (searchTerm: string): string => {
-    const select = 'select=id,sku,item_name,plug_name,current_price,updated_at,created_at&order=updated_at.desc';
+  // ソート状態に合わせてサーバー側の並び（チャンク取得の順序）も揃える
+  const buildQuery = (searchTerm: string, sortState: StockSortState): string => {
+    const select = `select=id,sku,item_name,plug_name,current_price,updated_at,created_at&${buildStockOrder(sortState)}`;
     if (!searchTerm.trim()) return `stock?${select}`;
     const q = encodeURIComponent(`%${searchTerm.trim()}%`);
     return `stock?or=(sku.ilike.${q},item_name.ilike.${q},plug_name.ilike.${q})&${select}`;
@@ -74,7 +78,7 @@ export default function StockEditor() {
 
   // Fetch total count using Prefer: count=exact with a 0-row range
   const fetchCount = useCallback(async (searchTerm: string): Promise<number> => {
-    const path = buildQuery(searchTerm);
+    const path = buildQuery(searchTerm, sort);
     const resp = await apiFetch(`${path}&offset=0&limit=1`, {
       headers: { Prefer: 'count=exact' },
     });
@@ -84,16 +88,16 @@ export default function StockEditor() {
       if (parts.length === 2) return parseInt(parts[1], 10) || 0;
     }
     return 0;
-  }, []);
+  }, [sort]);
 
   // Fetch a chunk of rows from offset
   const fetchChunk = useCallback(async (searchTerm: string, offset: number, limit: number): Promise<StockRow[]> => {
-    const path = buildQuery(searchTerm);
+    const path = buildQuery(searchTerm, sort);
     const resp = await apiFetch(`${path}&offset=${offset}&limit=${limit}`, {
       headers: { Prefer: 'count=exact' },
     });
     return await resp.json();
-  }, []);
+  }, [sort]);
 
   // Initial load: get count + first chunk
   const loadData = useCallback(async (searchTerm: string) => {
@@ -264,10 +268,16 @@ export default function StockEditor() {
     }
   };
 
+  // 列タイトルクリック: 同じ列は昇順⇔降順トグル、別の列はその列の昇順（片方は解除）
+  const handleSortClick = (key: StockSortKey) => setSort((s) => nextStockSort(s, key));
+
+  // 読み込み済み行を表示用に安定ソート（日本語商品名は localeCompare('ja')）
+  const sortedRows = useMemo(() => sortStockRows(rows, sort), [rows, sort]);
+
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
   const pageStart = (currentPage - 1) * PAGE_SIZE;
-  const pageRows = rows.slice(pageStart, pageStart + PAGE_SIZE);
+  const pageRows = sortedRows.slice(pageStart, pageStart + PAGE_SIZE);
 
   // When page changes, check if we need to fetch more data
   useEffect(() => {
@@ -401,9 +411,31 @@ export default function StockEditor() {
           <thead>
             <tr className="bg-gray-100">
               <th className="border border-gray-300 px-2.5 py-1.5 text-left font-semibold">SKU</th>
-              <th className="border border-gray-300 px-2.5 py-1.5 text-left font-semibold">商品名</th>
+              <th className="border border-gray-300 p-0 text-left font-semibold">
+                <button
+                  onClick={() => handleSortClick('item_name')}
+                  title="クリックで商品名の昇順／降順を切り替え"
+                  className="w-full flex items-center gap-1 px-2.5 py-1.5 bg-transparent border-0 cursor-pointer font-semibold text-[13px] text-left hover:bg-gray-200"
+                >
+                  商品名
+                  <span className={sort.key === 'item_name' ? 'text-[#0070f3]' : 'text-gray-400'}>
+                    {sort.key === 'item_name' ? (sort.dir === 'asc' ? '▲' : '▼') : '↕'}
+                  </span>
+                </button>
+              </th>
               <th className="border border-gray-300 px-2.5 py-1.5 text-left font-semibold">plug_name</th>
-              <th className="border border-gray-300 px-2.5 py-1.5 text-right font-semibold">現在価格</th>
+              <th className="border border-gray-300 p-0 text-right font-semibold">
+                <button
+                  onClick={() => handleSortClick('current_price')}
+                  title="クリックで価格の昇順／降順を切り替え"
+                  className="w-full flex items-center justify-end gap-1 px-2.5 py-1.5 bg-transparent border-0 cursor-pointer font-semibold text-[13px] text-right hover:bg-gray-200"
+                >
+                  現在価格
+                  <span className={sort.key === 'current_price' ? 'text-[#0070f3]' : 'text-gray-400'}>
+                    {sort.key === 'current_price' ? (sort.dir === 'asc' ? '▲' : '▼') : '↕'}
+                  </span>
+                </button>
+              </th>
               <th className="border border-gray-300 px-2.5 py-1.5 text-left font-semibold">更新日時</th>
               <th className="border border-gray-300 px-2.5 py-1.5 text-left font-semibold">登録日時</th>
               <th className="border border-gray-300 px-2.5 py-1.5 text-left font-semibold w-[120px]">操作</th>
