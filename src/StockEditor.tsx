@@ -1,16 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { parseFile } from './fileParser';
+import { collectStockUpsertRows, toUpsertBatches } from '../lib/stockImport';
+import type { AmazonRow } from '../lib/parser';
 
 type StockRow = {
   id: string;
   sku: string;
+  item_name: string | null;
   plug_name: string | null;
   current_price: number | null;
   updated_at: string;
   created_at: string;
 };
 
-type DraftRow = { sku: string; plug_name: string; current_price: string };
+type DraftRow = { sku: string; item_name: string; plug_name: string; current_price: string };
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
@@ -31,7 +34,7 @@ async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
   return resp;
 }
 
-const EMPTY_DRAFT: DraftRow = { sku: '', plug_name: '', current_price: '' };
+const EMPTY_DRAFT: DraftRow = { sku: '', item_name: '', plug_name: '', current_price: '' };
 const PAGE_SIZE = 100;
 const CHUNK_SIZE = 1000;
 
@@ -63,10 +66,10 @@ export default function StockEditor() {
 
   // Build the base query path with optional search filter
   const buildQuery = (searchTerm: string): string => {
-    const select = 'select=id,sku,plug_name,current_price,updated_at,created_at&order=updated_at.desc';
+    const select = 'select=id,sku,item_name,plug_name,current_price,updated_at,created_at&order=updated_at.desc';
     if (!searchTerm.trim()) return `stock?${select}`;
     const q = encodeURIComponent(`%${searchTerm.trim()}%`);
-    return `stock?or=(sku.ilike.${q},plug_name.ilike.${q})&${select}`;
+    return `stock?or=(sku.ilike.${q},item_name.ilike.${q},plug_name.ilike.${q})&${select}`;
   };
 
   // Fetch total count using Prefer: count=exact with a 0-row range
@@ -146,6 +149,7 @@ export default function StockEditor() {
 
   const handleAdd = async () => {
     const sku = draft.sku.trim();
+    const item_name = draft.item_name.trim();
     const plug_name = draft.plug_name.trim();
     if (!sku) { setError('SKU は必須です'); return; }
     const priceNum = draft.current_price.trim() === '' ? null : parseInt(draft.current_price.replace(/,/g, ''), 10);
@@ -155,7 +159,7 @@ export default function StockEditor() {
       await apiFetch('stock', {
         method: 'POST',
         headers: { Prefer: 'return=representation,resolution=merge-duplicates' },
-        body: JSON.stringify({ sku, plug_name: plug_name || null, current_price: priceNum, updated_at: new Date().toISOString() }),
+        body: JSON.stringify({ sku, item_name: item_name || null, plug_name: plug_name || null, current_price: priceNum, updated_at: new Date().toISOString() }),
       });
       setDraft(EMPTY_DRAFT);
       notify('追加しました');
@@ -167,13 +171,14 @@ export default function StockEditor() {
 
   const startEdit = (row: StockRow) => {
     setEditId(row.id);
-    setEditDraft({ sku: row.sku, plug_name: row.plug_name ?? '', current_price: row.current_price != null ? String(row.current_price) : '' });
+    setEditDraft({ sku: row.sku, item_name: row.item_name ?? '', plug_name: row.plug_name ?? '', current_price: row.current_price != null ? String(row.current_price) : '' });
   };
 
   const cancelEdit = () => { setEditId(null); setEditDraft(EMPTY_DRAFT); };
 
   const handleSave = async (id: string) => {
     const sku = editDraft.sku.trim();
+    const item_name = editDraft.item_name.trim();
     const plug_name = editDraft.plug_name.trim();
     if (!sku) { setError('SKU は必須です'); return; }
     const priceNum = editDraft.current_price.trim() === '' ? null : parseInt(editDraft.current_price.replace(/,/g, ''), 10);
@@ -182,7 +187,7 @@ export default function StockEditor() {
     try {
       await apiFetch(`stock?id=eq.${id}`, {
         method: 'PATCH',
-        body: JSON.stringify({ sku, plug_name: plug_name || null, current_price: priceNum, updated_at: new Date().toISOString() }),
+        body: JSON.stringify({ sku, item_name: item_name || null, plug_name: plug_name || null, current_price: priceNum, updated_at: new Date().toISOString() }),
       });
       cancelEdit();
       notify('更新しました');
@@ -214,9 +219,7 @@ export default function StockEditor() {
     setImportMsg(null);
     setError(null);
     try {
-      const seen = new Map<string, { sku: string; current_price: number | null }>();
-      let noSkuCount = 0;
-      let noPriceCount = 0;
+      const allParsed: AmazonRow[] = [];
       const fileErrors: string[] = [];
       let totalParsed = 0;
 
@@ -224,13 +227,7 @@ export default function StockEditor() {
         const { rows: parsed, diag } = await parseFile(file, { activeOnly: false });
         if (diag.error) { fileErrors.push(`${file.name}: ${diag.error}`); continue; }
         totalParsed += parsed.length;
-        for (const r of parsed) {
-          const sku = r.sku.trim();
-          if (!sku) { noSkuCount++; continue; }
-          const price = r.currentPrice > 0 ? Math.round(r.currentPrice) : null;
-          if (price === null) noPriceCount++;
-          seen.set(sku, { sku, current_price: price });
-        }
+        allParsed.push(...parsed);
       }
 
       if (fileErrors.length > 0 && totalParsed === 0) {
@@ -238,17 +235,23 @@ export default function StockEditor() {
         return;
       }
 
-      const upsertRows = Array.from(seen.values()).map((r) => ({ ...r, updated_at: new Date().toISOString() }));
+      const { rows: upsertRows, noSkuCount, noPriceCount } = collectStockUpsertRows(allParsed);
       if (upsertRows.length === 0) { setImportError('SKU が取得できる行がありませんでした。'); return; }
 
-      const resp = await apiFetch('stock', {
-        method: 'POST',
-        headers: { Prefer: 'return=representation,resolution=merge-duplicates' },
-        body: JSON.stringify(upsertRows),
-      });
-      const inserted = await resp.json() as StockRow[];
+      // 商品名が取れない行（旧形式）は item_name を送らず既存値を保持する（後方互換）
+      const batches = toUpsertBatches(upsertRows, new Date().toISOString());
+      let insertedCount = 0;
+      for (const batch of batches) {
+        const resp = await apiFetch('stock', {
+          method: 'POST',
+          headers: { Prefer: 'return=representation,resolution=merge-duplicates' },
+          body: JSON.stringify(batch),
+        });
+        const inserted = await resp.json() as StockRow[];
+        insertedCount += inserted.length;
+      }
       await loadData(debouncedSearch);
-      const parts = [`${inserted.length} 件を取り込みました（${files.length} ファイル・${upsertRows.length} SKU）`];
+      const parts = [`${insertedCount} 件を取り込みました（${files.length} ファイル・${upsertRows.length} SKU）`];
       if (fileErrors.length > 0) parts.push(`読み込み失敗: ${fileErrors.length} 件`);
       if (noSkuCount > 0) parts.push(`SKU空: ${noSkuCount} 件スキップ`);
       if (noPriceCount > 0) parts.push(`価格空または0: ${noPriceCount} 件は価格未設定で登録`);
@@ -285,7 +288,7 @@ export default function StockEditor() {
     <div className="mx-auto px-6 py-6 font-sans text-black" style={{ maxWidth: '100vw' }}>
       <h2 className="mt-0">在庫DB（stock）編集</h2>
       <p className="text-gray-600 text-[13px] mb-4">
-        SKU と プラグ型番（plug_name）、現在価格（current_price）の対応を管理します。
+        SKU と 商品名（item_name）、プラグ型番（plug_name）、現在価格（current_price）の対応を管理します。
         ここで登録した plug_name が価格改定ツールのプラグ判定に使われます。
       </p>
 
@@ -305,7 +308,8 @@ export default function StockEditor() {
         <h3 className="m-0 mb-2.5 text-sm">ファイルから一括取り込み（CSV / Excel .xlsx/.xlsm）</h3>
         <p className="text-gray-500 text-[12px] mb-2">
           Amazon用CSV・Excelファイルを読み込み、SKU をキーに stock テーブルへ登録・更新します。
-          現在価格（販売価格 JPY）を current_price にセットします。同一 SKU が既にある場合は価格を更新します。
+          商品名を item_name に、現在価格（販売価格 JPY）を current_price にセットします。同一 SKU が既にある場合は商品名・価格を更新します
+          （商品名列が無い旧形式ファイルは従来どおり価格のみ更新し、登録済みの商品名は保持します）。
         </p>
         <div className="flex items-center gap-2 flex-wrap">
           <input
@@ -349,6 +353,13 @@ export default function StockEditor() {
             className="px-2 py-1 border border-gray-400 rounded text-[13px] bg-white text-black min-w-[160px] box-border"
           />
           <input
+            placeholder="商品名 / item_name"
+            value={draft.item_name}
+            onChange={(e) => setDraft((d) => ({ ...d, item_name: e.target.value }))}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleAdd(); }}
+            className="px-2 py-1 border border-gray-400 rounded text-[13px] bg-white text-black min-w-[260px] box-border"
+          />
+          <input
             placeholder="プラグ型番 / plug_name"
             value={draft.plug_name}
             onChange={(e) => setDraft((d) => ({ ...d, plug_name: e.target.value }))}
@@ -369,7 +380,7 @@ export default function StockEditor() {
       {/* 検索ボックス */}
       <div className="mb-2.5">
         <input
-          placeholder="SKU / plug_name で絞り込み（部分一致・サーバー検索）"
+          placeholder="SKU / 商品名 / plug_name で絞り込み（部分一致・サーバー検索）"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="px-2 py-1 border border-gray-400 rounded text-[13px] bg-white text-black min-w-[300px] max-w-[400px] box-border"
@@ -390,6 +401,7 @@ export default function StockEditor() {
           <thead>
             <tr className="bg-gray-100">
               <th className="border border-gray-300 px-2.5 py-1.5 text-left font-semibold">SKU</th>
+              <th className="border border-gray-300 px-2.5 py-1.5 text-left font-semibold">商品名</th>
               <th className="border border-gray-300 px-2.5 py-1.5 text-left font-semibold">plug_name</th>
               <th className="border border-gray-300 px-2.5 py-1.5 text-right font-semibold">現在価格</th>
               <th className="border border-gray-300 px-2.5 py-1.5 text-left font-semibold">更新日時</th>
@@ -399,10 +411,10 @@ export default function StockEditor() {
           </thead>
           <tbody>
             {loading && (
-              <tr><td colSpan={6} className="p-4 text-center text-gray-500">読み込み中...</td></tr>
+              <tr><td colSpan={7} className="p-4 text-center text-gray-500">読み込み中...</td></tr>
             )}
             {!loading && totalCount === 0 && (
-              <tr><td colSpan={6} className="p-4 text-center text-gray-500">データがありません</td></tr>
+              <tr><td colSpan={7} className="p-4 text-center text-gray-500">データがありません</td></tr>
             )}
             {pageRows.map((row) =>
               editId === row.id ? (
@@ -411,6 +423,13 @@ export default function StockEditor() {
                     <input
                       value={editDraft.sku}
                       onChange={(e) => setEditDraft((d) => ({ ...d, sku: e.target.value }))}
+                      className="px-2 py-1 border border-gray-400 rounded text-[13px] bg-white text-black w-full box-border"
+                    />
+                  </td>
+                  <td className="px-2.5 py-1.5 align-middle">
+                    <input
+                      value={editDraft.item_name}
+                      onChange={(e) => setEditDraft((d) => ({ ...d, item_name: e.target.value }))}
                       className="px-2 py-1 border border-gray-400 rounded text-[13px] bg-white text-black w-full box-border"
                     />
                   </td>
@@ -438,6 +457,9 @@ export default function StockEditor() {
               ) : (
                 <tr key={row.id} className="border-t border-gray-200">
                   <td className="px-2.5 py-1.5 align-middle">{row.sku}</td>
+                  <td className={`px-2.5 py-1.5 align-middle max-w-[320px] ${row.item_name ? 'text-black' : 'text-gray-300'}`} title={row.item_name ?? ''}>
+                    {row.item_name ?? '（未設定）'}
+                  </td>
                   <td className={`px-2.5 py-1.5 align-middle ${row.plug_name ? 'text-black' : 'text-gray-300'}`}>{row.plug_name ?? '（未設定）'}</td>
                   <td className={`px-2.5 py-1.5 align-middle text-right ${row.current_price != null ? 'text-black' : 'text-gray-300'}`}>
                     {row.current_price != null ? row.current_price.toLocaleString() : '（未設定）'}
@@ -452,7 +474,7 @@ export default function StockEditor() {
               )
             )}
             {fetchingMore && (
-              <tr><td colSpan={6} className="p-2 text-center text-gray-400 text-[12px]">追加データを読み込み中...</td></tr>
+              <tr><td colSpan={7} className="p-2 text-center text-gray-400 text-[12px]">追加データを読み込み中...</td></tr>
             )}
           </tbody>
         </table>
