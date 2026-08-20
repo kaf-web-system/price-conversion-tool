@@ -99,6 +99,7 @@ function StockTableEditor({ db, table }: { db: StockDb; table: StockTable }) {
   const [editDraft, setEditDraft] = useState<DraftRow>(EMPTY_DRAFT);
   const [page, setPage] = useState(1);
   const [sort, setSort] = useState<StockSortState>(DEFAULT_STOCK_SORT);
+  const [unregisteredOnly, setUnregisteredOnly] = useState(false);
 
   const notify = (msg: string) => {
     setSuccess(msg);
@@ -107,7 +108,7 @@ function StockTableEditor({ db, table }: { db: StockDb; table: StockTable }) {
 
   // Fetch total count using Prefer: count=exact with a 0-row range
   const fetchCount = useCallback(async (searchTerm: string): Promise<number> => {
-    const path = buildStockQueryPath(table, searchTerm, sort);
+    const path = buildStockQueryPath(table, searchTerm, sort, unregisteredOnly);
     const resp = await apiFetch(`${path}&offset=0&limit=1`, {
       headers: { Prefer: 'count=exact' },
     });
@@ -117,16 +118,16 @@ function StockTableEditor({ db, table }: { db: StockDb; table: StockTable }) {
       if (parts.length === 2) return parseInt(parts[1], 10) || 0;
     }
     return 0;
-  }, [table, sort]);
+  }, [table, sort, unregisteredOnly]);
 
   // Fetch a chunk of rows from offset
   const fetchChunk = useCallback(async (searchTerm: string, offset: number, limit: number): Promise<StockRow[]> => {
-    const path = buildStockQueryPath(table, searchTerm, sort);
+    const path = buildStockQueryPath(table, searchTerm, sort, unregisteredOnly);
     const resp = await apiFetch(`${path}&offset=${offset}&limit=${limit}`, {
       headers: { Prefer: 'count=exact' },
     });
     return await resp.json();
-  }, [table, sort]);
+  }, [table, sort, unregisteredOnly]);
 
   // Initial load: get count + first chunk
   const loadData = useCallback(async (searchTerm: string) => {
@@ -157,10 +158,10 @@ function StockTableEditor({ db, table }: { db: StockDb; table: StockTable }) {
     return () => clearTimeout(timer);
   }, [search]);
 
-  // Reload data when debounced search changes
+  // Reload data when debounced search or unregisteredOnly filter changes
   useEffect(() => {
     loadData(debouncedSearch);
-  }, [debouncedSearch, loadData]);
+  }, [debouncedSearch, loadData, unregisteredOnly]);
 
   // Fetch next chunk when the current page goes beyond loaded rows
   const ensureChunkLoaded = useCallback(async (searchTerm: string, neededRowCount: number) => {
@@ -475,8 +476,8 @@ function StockTableEditor({ db, table }: { db: StockDb; table: StockTable }) {
         </div>
       </div>
 
-      {/* 検索ボックス */}
-      <div className="mb-2.5">
+      {/* 検索ボックス + プラグ未登録フィルター */}
+      <div className="mb-2.5 flex items-center gap-3 flex-wrap">
         <input
           placeholder="SKU / 商品名 / plug_name で絞り込み（部分一致・サーバー検索）"
           value={search}
@@ -486,11 +487,20 @@ function StockTableEditor({ db, table }: { db: StockDb; table: StockTable }) {
         {search && (
           <button
             onClick={() => setSearch('')}
-            className="ml-2 px-2.5 py-1 text-xs cursor-pointer border border-gray-300 rounded bg-white text-gray-600"
+            className="px-2.5 py-1 text-xs cursor-pointer border border-gray-300 rounded bg-white text-gray-600"
           >
             クリア
           </button>
         )}
+        <label className="flex items-center gap-1.5 text-[13px] text-gray-700 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={unregisteredOnly}
+            onChange={(e) => setUnregisteredOnly(e.target.checked)}
+            className="cursor-pointer"
+          />
+          プラグ未登録の商品のみ表示
+        </label>
       </div>
 
       {/* 一覧テーブル */}
