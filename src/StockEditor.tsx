@@ -189,7 +189,7 @@ function StockTableEditor({ db, table }: { db: StockDb; table: StockTable }) {
     if (priceNum !== null && isNaN(priceNum)) { setError('現在価格が数値として読み取れません'); return; }
     setError(null);
     try {
-      await apiFetch(table, {
+      await apiFetch(`${table}?on_conflict=sku`, {
         method: 'POST',
         headers: { Prefer: 'return=representation,resolution=merge-duplicates' },
         body: JSON.stringify({ sku, item_name: item_name || null, plug_name: plug_name || null, current_price: priceNum, updated_at: new Date().toISOString() }),
@@ -301,7 +301,7 @@ function StockTableEditor({ db, table }: { db: StockDb; table: StockTable }) {
       const batches = toUpsertBatches(upsertRows, new Date().toISOString());
       let insertedCount = 0;
       for (const batch of batches) {
-        const resp = await apiFetch(table, {
+        const resp = await apiFetch(`${table}?on_conflict=sku`, {
           method: 'POST',
           headers: { Prefer: 'return=representation,resolution=merge-duplicates' },
           body: JSON.stringify(batch),
