@@ -189,14 +189,24 @@ function StockTableEditor({ db, table }: { db: StockDb; table: StockTable }) {
     if (priceNum !== null && isNaN(priceNum)) { setError('現在価格が数値として読み取れません'); return; }
     setError(null);
     try {
-      await apiFetch(`${table}?on_conflict=sku`, {
+      const resp = await apiFetch(`${table}?on_conflict=sku`, {
         method: 'POST',
         headers: { Prefer: 'return=representation,resolution=merge-duplicates' },
         body: JSON.stringify({ sku, item_name: item_name || null, plug_name: plug_name || null, current_price: priceNum, updated_at: new Date().toISOString() }),
       });
+      const inserted = await resp.json() as StockRow[];
       setDraft(EMPTY_DRAFT);
       notify('追加しました');
-      await loadData(debouncedSearch);
+      if (inserted.length > 0) {
+        const existingIds = new Set(rows.map((r) => r.id));
+        const newRows = inserted.filter((r) => !existingIds.has(r.id));
+        const insertedIds = new Set(inserted.map((r) => r.id));
+        setRows((prev) => [...prev.map((r) => insertedIds.has(r.id) ? inserted.find((nr) => nr.id === r.id)! : r), ...newRows]);
+        if (newRows.length > 0) {
+          setTotalCount((prev) => prev + newRows.length);
+          setLoadedCount((prev) => prev + newRows.length);
+        }
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -218,13 +228,14 @@ function StockTableEditor({ db, table }: { db: StockDb; table: StockTable }) {
     if (priceNum !== null && isNaN(priceNum)) { setError('現在価格が数値として読み取れません'); return; }
     setError(null);
     try {
+      const now = new Date().toISOString();
       await apiFetch(`${table}?id=eq.${id}`, {
         method: 'PATCH',
-        body: JSON.stringify({ sku, item_name: item_name || null, plug_name: plug_name || null, current_price: priceNum, updated_at: new Date().toISOString() }),
+        body: JSON.stringify({ sku, item_name: item_name || null, plug_name: plug_name || null, current_price: priceNum, updated_at: now }),
       });
       cancelEdit();
       notify('更新しました');
-      await loadData(debouncedSearch);
+      setRows((prev) => prev.map((r) => r.id === id ? { ...r, sku, item_name: item_name || null, plug_name: plug_name || null, current_price: priceNum, updated_at: now } : r));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -236,7 +247,9 @@ function StockTableEditor({ db, table }: { db: StockDb; table: StockTable }) {
     try {
       await apiFetch(`${table}?id=eq.${id}`, { method: 'DELETE', headers: { Prefer: '' } });
       notify('削除しました');
-      await loadData(debouncedSearch);
+      setRows((prev) => prev.filter((r) => r.id !== id));
+      setTotalCount((prev) => Math.max(0, prev - 1));
+      setLoadedCount((prev) => Math.max(0, prev - 1));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
