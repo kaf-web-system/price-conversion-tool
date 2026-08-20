@@ -1,16 +1,25 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { parseFile } from './fileParser';
+import { collectStockUpsertRows, toUpsertBatches } from '../lib/stockImport';
+import type { StockUpsertRow } from '../lib/stockImport';
+import { collectShopifyStockRows } from '../lib/shopifyStockImport';
+import { buildStockQueryPath } from '../lib/stockQuery';
+import type { StockTable } from '../lib/stockQuery';
+import { DEFAULT_STOCK_SORT, nextStockSort, sortStockRows } from '../lib/stockSort';
+import type { StockSortKey, StockSortState } from '../lib/stockSort';
+import type { AmazonRow } from '../lib/parser';
 
 type StockRow = {
   id: string;
   sku: string;
+  item_name: string | null;
   plug_name: string | null;
   current_price: number | null;
   updated_at: string;
   created_at: string;
 };
 
-type DraftRow = { sku: string; plug_name: string; current_price: string };
+type DraftRow = { sku: string; item_name: string; plug_name: string; current_price: string };
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
@@ -31,11 +40,45 @@ async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
   return resp;
 }
 
-const EMPTY_DRAFT: DraftRow = { sku: '', plug_name: '', current_price: '' };
+const EMPTY_DRAFT: DraftRow = { sku: '', item_name: '', plug_name: '', current_price: '' };
 const PAGE_SIZE = 100;
 const CHUNK_SIZE = 1000;
 
+type StockDb = 'amazon' | 'shopify';
+
+/** 価格改定ツール本体のAmazon/Shopifyタブと同じ配色（App.tsx のプラットフォーム切替に倣う） */
+const DB_TABS: { key: StockDb; table: StockTable; label: string; activeClass: string }[] = [
+  { key: 'amazon',  table: 'stock',         label: 'Amazon在庫DB編集',  activeClass: 'font-bold bg-[#FF9900] text-white border-[#FF9900]' },
+  { key: 'shopify', table: 'stock_shopify', label: 'Shopify在庫DB編集', activeClass: 'font-bold bg-[#95BF47] text-white border-[#95BF47]' },
+];
+
 export default function StockEditor() {
+  const [db, setDb] = useState<StockDb>('amazon');
+  const active = DB_TABS.find((t) => t.key === db)!;
+
+  return (
+    <div className="mx-auto px-6 py-6 font-sans text-black" style={{ maxWidth: '100vw' }}>
+      {/* Amazon / Shopify 在庫DB切替タブ */}
+      <div className="flex border-b border-gray-300 mb-4">
+        {DB_TABS.map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setDb(t.key)}
+            className={`px-4 py-1.5 text-[13px] border-0 border-b-2 -mb-px cursor-pointer ${
+              db === t.key ? t.activeClass : 'font-normal bg-transparent border-transparent text-gray-500'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      {/* key でタブ切替時に状態（検索・編集中・ページ）をリセットして対象テーブルを読み直す */}
+      <StockTableEditor key={db} db={db} table={active.table} />
+    </div>
+  );
+}
+
+function StockTableEditor({ db, table }: { db: StockDb; table: StockTable }) {
   const [rows, setRows] = useState<StockRow[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [loadedCount, setLoadedCount] = useState(0);
@@ -55,23 +98,17 @@ export default function StockEditor() {
   const [editId, setEditId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<DraftRow>(EMPTY_DRAFT);
   const [page, setPage] = useState(1);
+  const [sort, setSort] = useState<StockSortState>(DEFAULT_STOCK_SORT);
+  const [unregisteredOnly, setUnregisteredOnly] = useState(false);
 
   const notify = (msg: string) => {
     setSuccess(msg);
     setTimeout(() => setSuccess(null), 3000);
   };
 
-  // Build the base query path with optional search filter
-  const buildQuery = (searchTerm: string): string => {
-    const select = 'select=id,sku,plug_name,current_price,updated_at,created_at&order=updated_at.desc';
-    if (!searchTerm.trim()) return `stock?${select}`;
-    const q = encodeURIComponent(`%${searchTerm.trim()}%`);
-    return `stock?or=(sku.ilike.${q},plug_name.ilike.${q})&${select}`;
-  };
-
   // Fetch total count using Prefer: count=exact with a 0-row range
   const fetchCount = useCallback(async (searchTerm: string): Promise<number> => {
-    const path = buildQuery(searchTerm);
+    const path = buildStockQueryPath(table, searchTerm, sort, unregisteredOnly);
     const resp = await apiFetch(`${path}&offset=0&limit=1`, {
       headers: { Prefer: 'count=exact' },
     });
@@ -81,16 +118,16 @@ export default function StockEditor() {
       if (parts.length === 2) return parseInt(parts[1], 10) || 0;
     }
     return 0;
-  }, []);
+  }, [table, sort, unregisteredOnly]);
 
   // Fetch a chunk of rows from offset
   const fetchChunk = useCallback(async (searchTerm: string, offset: number, limit: number): Promise<StockRow[]> => {
-    const path = buildQuery(searchTerm);
+    const path = buildStockQueryPath(table, searchTerm, sort, unregisteredOnly);
     const resp = await apiFetch(`${path}&offset=${offset}&limit=${limit}`, {
       headers: { Prefer: 'count=exact' },
     });
     return await resp.json();
-  }, []);
+  }, [table, sort, unregisteredOnly]);
 
   // Initial load: get count + first chunk
   const loadData = useCallback(async (searchTerm: string) => {
@@ -121,10 +158,10 @@ export default function StockEditor() {
     return () => clearTimeout(timer);
   }, [search]);
 
-  // Reload data when debounced search changes
+  // Reload data when debounced search or unregisteredOnly filter changes
   useEffect(() => {
     loadData(debouncedSearch);
-  }, [debouncedSearch, loadData]);
+  }, [debouncedSearch, loadData, unregisteredOnly]);
 
   // Fetch next chunk when the current page goes beyond loaded rows
   const ensureChunkLoaded = useCallback(async (searchTerm: string, neededRowCount: number) => {
@@ -146,20 +183,31 @@ export default function StockEditor() {
 
   const handleAdd = async () => {
     const sku = draft.sku.trim();
+    const item_name = draft.item_name.trim();
     const plug_name = draft.plug_name.trim();
     if (!sku) { setError('SKU は必須です'); return; }
     const priceNum = draft.current_price.trim() === '' ? null : parseInt(draft.current_price.replace(/,/g, ''), 10);
     if (priceNum !== null && isNaN(priceNum)) { setError('現在価格が数値として読み取れません'); return; }
     setError(null);
     try {
-      await apiFetch('stock', {
+      const resp = await apiFetch(`${table}?on_conflict=sku`, {
         method: 'POST',
         headers: { Prefer: 'return=representation,resolution=merge-duplicates' },
-        body: JSON.stringify({ sku, plug_name: plug_name || null, current_price: priceNum, updated_at: new Date().toISOString() }),
+        body: JSON.stringify({ sku, item_name: item_name || null, plug_name: plug_name || null, current_price: priceNum, updated_at: new Date().toISOString() }),
       });
+      const inserted = await resp.json() as StockRow[];
       setDraft(EMPTY_DRAFT);
       notify('追加しました');
-      await loadData(debouncedSearch);
+      if (inserted.length > 0) {
+        const existingIds = new Set(rows.map((r) => r.id));
+        const newRows = inserted.filter((r) => !existingIds.has(r.id));
+        const insertedIds = new Set(inserted.map((r) => r.id));
+        setRows((prev) => [...prev.map((r) => insertedIds.has(r.id) ? inserted.find((nr) => nr.id === r.id)! : r), ...newRows]);
+        if (newRows.length > 0) {
+          setTotalCount((prev) => prev + newRows.length);
+          setLoadedCount((prev) => prev + newRows.length);
+        }
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -167,26 +215,28 @@ export default function StockEditor() {
 
   const startEdit = (row: StockRow) => {
     setEditId(row.id);
-    setEditDraft({ sku: row.sku, plug_name: row.plug_name ?? '', current_price: row.current_price != null ? String(row.current_price) : '' });
+    setEditDraft({ sku: row.sku, item_name: row.item_name ?? '', plug_name: row.plug_name ?? '', current_price: row.current_price != null ? String(row.current_price) : '' });
   };
 
   const cancelEdit = () => { setEditId(null); setEditDraft(EMPTY_DRAFT); };
 
   const handleSave = async (id: string) => {
     const sku = editDraft.sku.trim();
+    const item_name = editDraft.item_name.trim();
     const plug_name = editDraft.plug_name.trim();
     if (!sku) { setError('SKU は必須です'); return; }
     const priceNum = editDraft.current_price.trim() === '' ? null : parseInt(editDraft.current_price.replace(/,/g, ''), 10);
     if (priceNum !== null && isNaN(priceNum)) { setError('現在価格が数値として読み取れません'); return; }
     setError(null);
     try {
-      await apiFetch(`stock?id=eq.${id}`, {
+      const now = new Date().toISOString();
+      await apiFetch(`${table}?id=eq.${id}`, {
         method: 'PATCH',
-        body: JSON.stringify({ sku, plug_name: plug_name || null, current_price: priceNum, updated_at: new Date().toISOString() }),
+        body: JSON.stringify({ sku, item_name: item_name || null, plug_name: plug_name || null, current_price: priceNum, updated_at: now }),
       });
       cancelEdit();
       notify('更新しました');
-      await loadData(debouncedSearch);
+      setRows((prev) => prev.map((r) => r.id === id ? { ...r, sku, item_name: item_name || null, plug_name: plug_name || null, current_price: priceNum, updated_at: now } : r));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -196,9 +246,11 @@ export default function StockEditor() {
     if (!window.confirm(`SKU「${sku}」を削除しますか？`)) return;
     setError(null);
     try {
-      await apiFetch(`stock?id=eq.${id}`, { method: 'DELETE', headers: { Prefer: '' } });
+      await apiFetch(`${table}?id=eq.${id}`, { method: 'DELETE', headers: { Prefer: '' } });
       notify('削除しました');
-      await loadData(debouncedSearch);
+      setRows((prev) => prev.filter((r) => r.id !== id));
+      setTotalCount((prev) => Math.max(0, prev - 1));
+      setLoadedCount((prev) => Math.max(0, prev - 1));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -214,43 +266,67 @@ export default function StockEditor() {
     setImportMsg(null);
     setError(null);
     try {
-      const seen = new Map<string, { sku: string; current_price: number | null }>();
+      const fileErrors: string[] = [];
+      let upsertRows: StockUpsertRow[] = [];
       let noSkuCount = 0;
       let noPriceCount = 0;
-      const fileErrors: string[] = [];
-      let totalParsed = 0;
 
-      for (const file of files) {
-        const { rows: parsed, diag } = await parseFile(file, { activeOnly: false });
-        if (diag.error) { fileErrors.push(`${file.name}: ${diag.error}`); continue; }
-        totalParsed += parsed.length;
-        for (const r of parsed) {
-          const sku = r.sku.trim();
-          if (!sku) { noSkuCount++; continue; }
-          const price = r.currentPrice > 0 ? Math.round(r.currentPrice) : null;
-          if (price === null) noPriceCount++;
-          seen.set(sku, { sku, current_price: price });
+      if (db === 'shopify') {
+        // Shopify商品CSV（Handle / Title / Option1-3 Value / Variant Price）から組み立てる
+        const merged = new Map<string, StockUpsertRow>();
+        for (const file of files) {
+          const text = await file.text();
+          const result = collectShopifyStockRows(text);
+          if (result.columnError) { fileErrors.push(`${file.name}: ${result.columnError}`); continue; }
+          noSkuCount += result.noSkuCount;
+          noPriceCount += result.noPriceCount;
+          for (const row of result.rows) merged.set(row.sku, row); // 同一skuは後勝ち
         }
+        upsertRows = Array.from(merged.values());
+        if (fileErrors.length > 0 && upsertRows.length === 0) {
+          setImportError(`すべてのファイルの読み込みに失敗しました:\n${fileErrors.join('\n')}`);
+          return;
+        }
+      } else {
+        const allParsed: AmazonRow[] = [];
+        let totalParsed = 0;
+        for (const file of files) {
+          const { rows: parsed, diag } = await parseFile(file, { activeOnly: false });
+          if (diag.error) { fileErrors.push(`${file.name}: ${diag.error}`); continue; }
+          totalParsed += parsed.length;
+          allParsed.push(...parsed);
+        }
+        if (fileErrors.length > 0 && totalParsed === 0) {
+          setImportError(`すべてのファイルの読み込みに失敗しました:\n${fileErrors.join('\n')}`);
+          return;
+        }
+        const collected = collectStockUpsertRows(allParsed);
+        upsertRows = collected.rows;
+        noSkuCount = collected.noSkuCount;
+        noPriceCount = collected.noPriceCount;
       }
 
-      if (fileErrors.length > 0 && totalParsed === 0) {
-        setImportError(`すべてのファイルの読み込みに失敗しました:\n${fileErrors.join('\n')}`);
+      if (upsertRows.length === 0) {
+        setImportError(db === 'shopify' ? 'Handle が取得できる行がありませんでした。' : 'SKU が取得できる行がありませんでした。');
         return;
       }
 
-      const upsertRows = Array.from(seen.values()).map((r) => ({ ...r, updated_at: new Date().toISOString() }));
-      if (upsertRows.length === 0) { setImportError('SKU が取得できる行がありませんでした。'); return; }
-
-      const resp = await apiFetch('stock', {
-        method: 'POST',
-        headers: { Prefer: 'return=representation,resolution=merge-duplicates' },
-        body: JSON.stringify(upsertRows),
-      });
-      const inserted = await resp.json() as StockRow[];
+      // 商品名が取れない行（旧形式）は item_name を送らず既存値を保持する（後方互換）
+      const batches = toUpsertBatches(upsertRows, new Date().toISOString());
+      let insertedCount = 0;
+      for (const batch of batches) {
+        const resp = await apiFetch(`${table}?on_conflict=sku`, {
+          method: 'POST',
+          headers: { Prefer: 'return=representation,resolution=merge-duplicates' },
+          body: JSON.stringify(batch),
+        });
+        const inserted = await resp.json() as StockRow[];
+        insertedCount += inserted.length;
+      }
       await loadData(debouncedSearch);
-      const parts = [`${inserted.length} 件を取り込みました（${files.length} ファイル・${upsertRows.length} SKU）`];
+      const parts = [`${insertedCount} 件を取り込みました（${files.length} ファイル・${upsertRows.length} SKU）`];
       if (fileErrors.length > 0) parts.push(`読み込み失敗: ${fileErrors.length} 件`);
-      if (noSkuCount > 0) parts.push(`SKU空: ${noSkuCount} 件スキップ`);
+      if (noSkuCount > 0) parts.push(`${db === 'shopify' ? 'Handle空' : 'SKU空'}: ${noSkuCount} 件スキップ`);
       if (noPriceCount > 0) parts.push(`価格空または0: ${noPriceCount} 件は価格未設定で登録`);
       setImportMsg(parts.join(' / '));
       if (fileErrors.length > 0) setImportError(`一部ファイル読み込み失敗:\n${fileErrors.join('\n')}`);
@@ -261,10 +337,16 @@ export default function StockEditor() {
     }
   };
 
+  // 列タイトルクリック: 同じ列は昇順⇔降順トグル、別の列はその列の昇順（片方は解除）
+  const handleSortClick = (key: StockSortKey) => setSort((s) => nextStockSort(s, key));
+
+  // 読み込み済み行を表示用に安定ソート（日本語商品名は localeCompare('ja')）
+  const sortedRows = useMemo(() => sortStockRows(rows, sort), [rows, sort]);
+
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
   const pageStart = (currentPage - 1) * PAGE_SIZE;
-  const pageRows = rows.slice(pageStart, pageStart + PAGE_SIZE);
+  const pageRows = sortedRows.slice(pageStart, pageStart + PAGE_SIZE);
 
   // When page changes, check if we need to fetch more data
   useEffect(() => {
@@ -282,11 +364,17 @@ export default function StockEditor() {
   for (let p = startPage; p <= endPage; p++) pageNumbers.push(p);
 
   return (
-    <div className="mx-auto px-6 py-6 font-sans text-black" style={{ maxWidth: '100vw' }}>
-      <h2 className="mt-0">在庫DB（stock）編集</h2>
+    <div>
+      <h2 className="mt-0">{db === 'shopify' ? 'Shopify在庫DB（stock_shopify）編集' : 'Amazon在庫DB（stock）編集'}</h2>
       <p className="text-gray-600 text-[13px] mb-4">
-        SKU と プラグ型番（plug_name）、現在価格（current_price）の対応を管理します。
+        SKU と 商品名（item_name）、プラグ型番（plug_name）、現在価格（current_price）の対応を管理します。
         ここで登録した plug_name が価格改定ツールのプラグ判定に使われます。
+        {db === 'shopify' && (
+          <>
+            <br />
+            Shopifyは複数の項目値でデータを特定するため、Handle とバリアントの Option1〜3 の値を _（アンダーバー）で接続した内容を SKU として登録します（例: aaaa_bbbb_cccc）。
+          </>
+        )}
       </p>
 
       {error && (
@@ -302,16 +390,31 @@ export default function StockEditor() {
 
       {/* ファイルインポート */}
       <div className="border border-gray-300 rounded p-3 mb-5">
-        <h3 className="m-0 mb-2.5 text-sm">ファイルから一括取り込み（CSV / Excel .xlsx/.xlsm）</h3>
+        <h3 className="m-0 mb-2.5 text-sm">
+          {db === 'shopify' ? 'Shopify商品CSVから一括取り込み' : 'ファイルから一括取り込み（CSV / Excel .xlsx/.xlsm）'}
+        </h3>
         <p className="text-gray-500 text-[12px] mb-2">
-          Amazon用CSV・Excelファイルを読み込み、SKU をキーに stock テーブルへ登録・更新します。
-          現在価格（販売価格 JPY）を current_price にセットします。同一 SKU が既にある場合は価格を更新します。
+          {db === 'shopify' ? (
+            <>
+              Shopify商品CSV（products_export形式: Handle / Title / Option1-3 Value / Variant Price）を読み込み、
+              Handle と Option1〜3 の値を _ で連結した SKU をキーに stock_shopify テーブルへ登録・更新します。
+              商品名（Title）を item_name に、Variant Price を current_price にセットします。同一 SKU が既にある場合は商品名・価格を更新します。
+            </>
+          ) : (
+            <>
+              Amazon用CSV・Excelファイルを読み込み、SKU をキーに stock テーブルへ登録・更新します。
+              商品名を item_name に、現在価格（販売価格 JPY）を current_price にセットします。同一 SKU が既にある場合は商品名・価格を更新します
+              （商品名列が無い旧形式ファイルは従来どおり価格のみ更新し、登録済みの商品名は保持します）。
+            </>
+          )}
         </p>
         <div className="flex items-center gap-2 flex-wrap">
           <input
             ref={fileInputRef}
             type="file"
-            accept=".csv,.xlsx,.xls,.xlsm,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroenabled.12"
+            accept={db === 'shopify'
+              ? '.csv,text/csv'
+              : '.csv,.xlsx,.xls,.xlsm,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroenabled.12'}
             onChange={handleImport}
             disabled={importBusy}
             multiple
@@ -342,11 +445,18 @@ export default function StockEditor() {
         <h3 className="m-0 mb-2.5 text-sm">新規追加</h3>
         <div className="flex gap-2 items-center flex-wrap">
           <input
-            placeholder="SKU（必須）"
+            placeholder={db === 'shopify' ? 'SKU（必須・Handle_Option1_Option2_Option3）' : 'SKU（必須）'}
             value={draft.sku}
             onChange={(e) => setDraft((d) => ({ ...d, sku: e.target.value }))}
             onKeyDown={(e) => { if (e.key === 'Enter') handleAdd(); }}
             className="px-2 py-1 border border-gray-400 rounded text-[13px] bg-white text-black min-w-[160px] box-border"
+          />
+          <input
+            placeholder="商品名 / item_name"
+            value={draft.item_name}
+            onChange={(e) => setDraft((d) => ({ ...d, item_name: e.target.value }))}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleAdd(); }}
+            className="px-2 py-1 border border-gray-400 rounded text-[13px] bg-white text-black min-w-[260px] box-border"
           />
           <input
             placeholder="プラグ型番 / plug_name"
@@ -366,10 +476,10 @@ export default function StockEditor() {
         </div>
       </div>
 
-      {/* 検索ボックス */}
-      <div className="mb-2.5">
+      {/* 検索ボックス + プラグ未登録フィルター */}
+      <div className="mb-2.5 flex items-center gap-3 flex-wrap">
         <input
-          placeholder="SKU / plug_name で絞り込み（部分一致・サーバー検索）"
+          placeholder="SKU / 商品名 / plug_name で絞り込み（部分一致・サーバー検索）"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="px-2 py-1 border border-gray-400 rounded text-[13px] bg-white text-black min-w-[300px] max-w-[400px] box-border"
@@ -377,11 +487,20 @@ export default function StockEditor() {
         {search && (
           <button
             onClick={() => setSearch('')}
-            className="ml-2 px-2.5 py-1 text-xs cursor-pointer border border-gray-300 rounded bg-white text-gray-600"
+            className="px-2.5 py-1 text-xs cursor-pointer border border-gray-300 rounded bg-white text-gray-600"
           >
             クリア
           </button>
         )}
+        <label className="flex items-center gap-1.5 text-[13px] text-gray-700 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={unregisteredOnly}
+            onChange={(e) => setUnregisteredOnly(e.target.checked)}
+            className="cursor-pointer"
+          />
+          プラグ未登録の商品のみ表示
+        </label>
       </div>
 
       {/* 一覧テーブル */}
@@ -390,8 +509,31 @@ export default function StockEditor() {
           <thead>
             <tr className="bg-gray-100">
               <th className="border border-gray-300 px-2.5 py-1.5 text-left font-semibold">SKU</th>
+              <th className="border border-gray-300 p-0 text-left font-semibold">
+                <button
+                  onClick={() => handleSortClick('item_name')}
+                  title="クリックで商品名の昇順／降順を切り替え"
+                  className="w-full flex items-center gap-1 px-2.5 py-1.5 bg-transparent border-0 cursor-pointer font-semibold text-[13px] text-left hover:bg-gray-200"
+                >
+                  商品名
+                  <span className={sort.key === 'item_name' ? 'text-[#0070f3]' : 'text-gray-400'}>
+                    {sort.key === 'item_name' ? (sort.dir === 'asc' ? '▲' : '▼') : '↕'}
+                  </span>
+                </button>
+              </th>
               <th className="border border-gray-300 px-2.5 py-1.5 text-left font-semibold">plug_name</th>
-              <th className="border border-gray-300 px-2.5 py-1.5 text-right font-semibold">現在価格</th>
+              <th className="border border-gray-300 p-0 text-right font-semibold">
+                <button
+                  onClick={() => handleSortClick('current_price')}
+                  title="クリックで価格の昇順／降順を切り替え"
+                  className="w-full flex items-center justify-end gap-1 px-2.5 py-1.5 bg-transparent border-0 cursor-pointer font-semibold text-[13px] text-right hover:bg-gray-200"
+                >
+                  現在価格
+                  <span className={sort.key === 'current_price' ? 'text-[#0070f3]' : 'text-gray-400'}>
+                    {sort.key === 'current_price' ? (sort.dir === 'asc' ? '▲' : '▼') : '↕'}
+                  </span>
+                </button>
+              </th>
               <th className="border border-gray-300 px-2.5 py-1.5 text-left font-semibold">更新日時</th>
               <th className="border border-gray-300 px-2.5 py-1.5 text-left font-semibold">登録日時</th>
               <th className="border border-gray-300 px-2.5 py-1.5 text-left font-semibold w-[120px]">操作</th>
@@ -399,10 +541,10 @@ export default function StockEditor() {
           </thead>
           <tbody>
             {loading && (
-              <tr><td colSpan={6} className="p-4 text-center text-gray-500">読み込み中...</td></tr>
+              <tr><td colSpan={7} className="p-4 text-center text-gray-500">読み込み中...</td></tr>
             )}
             {!loading && totalCount === 0 && (
-              <tr><td colSpan={6} className="p-4 text-center text-gray-500">データがありません</td></tr>
+              <tr><td colSpan={7} className="p-4 text-center text-gray-500">データがありません</td></tr>
             )}
             {pageRows.map((row) =>
               editId === row.id ? (
@@ -411,6 +553,13 @@ export default function StockEditor() {
                     <input
                       value={editDraft.sku}
                       onChange={(e) => setEditDraft((d) => ({ ...d, sku: e.target.value }))}
+                      className="px-2 py-1 border border-gray-400 rounded text-[13px] bg-white text-black w-full box-border"
+                    />
+                  </td>
+                  <td className="px-2.5 py-1.5 align-middle">
+                    <input
+                      value={editDraft.item_name}
+                      onChange={(e) => setEditDraft((d) => ({ ...d, item_name: e.target.value }))}
                       className="px-2 py-1 border border-gray-400 rounded text-[13px] bg-white text-black w-full box-border"
                     />
                   </td>
@@ -438,6 +587,9 @@ export default function StockEditor() {
               ) : (
                 <tr key={row.id} className="border-t border-gray-200">
                   <td className="px-2.5 py-1.5 align-middle">{row.sku}</td>
+                  <td className={`px-2.5 py-1.5 align-middle max-w-[320px] ${row.item_name ? 'text-black' : 'text-gray-300'}`} title={row.item_name ?? ''}>
+                    {row.item_name ?? '（未設定）'}
+                  </td>
                   <td className={`px-2.5 py-1.5 align-middle ${row.plug_name ? 'text-black' : 'text-gray-300'}`}>{row.plug_name ?? '（未設定）'}</td>
                   <td className={`px-2.5 py-1.5 align-middle text-right ${row.current_price != null ? 'text-black' : 'text-gray-300'}`}>
                     {row.current_price != null ? row.current_price.toLocaleString() : '（未設定）'}
@@ -452,7 +604,7 @@ export default function StockEditor() {
               )
             )}
             {fetchingMore && (
-              <tr><td colSpan={6} className="p-2 text-center text-gray-400 text-[12px]">追加データを読み込み中...</td></tr>
+              <tr><td colSpan={7} className="p-2 text-center text-gray-400 text-[12px]">追加データを読み込み中...</td></tr>
             )}
           </tbody>
         </table>

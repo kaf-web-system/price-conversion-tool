@@ -22,7 +22,8 @@ export type ShopifyParseResult = {
 
 // ─── CSV parser ──────────────────────────────────────────────────────────────
 // Parses the entire CSV text in one pass so multi-line quoted fields work.
-function parseCsv(text: string): string[][] {
+// （在庫DBインポート lib/shopifyStockImport.ts からも再利用するため export）
+export function parseCsv(text: string): string[][] {
   const rows: string[][] = [];
   let row: string[] = [];
   let field = '';
