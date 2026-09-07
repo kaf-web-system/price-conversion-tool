@@ -346,7 +346,7 @@ export default function ShopifyTool({ rules, rulesSection }: Props) {
                     <td className="border border-gray-200 px-2 py-1 align-top">{r.pieces ?? '-'}</td>
                     <td className="border border-gray-200 px-2 py-1 align-top">{r.currentPrice.toLocaleString()}</td>
                     <td className="border border-gray-200 px-2 py-1 align-top">{r.newPrice !== null ? r.newPrice.toLocaleString() : '-'}</td>
-                    <td className="border border-gray-200 px-2 py-1 align-top">{r.diff !== null ? `+${r.diff.toLocaleString()}` : '-'}</td>
+                    <td className="border border-gray-200 px-2 py-1 align-top">{r.diff !== null ? `${r.diff > 0 ? '+' : ''}${r.diff.toLocaleString()}` : '-'}</td>
                     <td className="border border-gray-200 px-2 py-1 align-top">{r.manualReason ?? ''}</td>
                     <td className="border border-gray-200 px-2 py-1 align-top">{r.cableRateUnregistered ? '●' : ''}</td>
                   </tr>

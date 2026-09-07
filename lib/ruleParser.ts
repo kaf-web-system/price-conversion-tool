@@ -186,6 +186,10 @@ function makeRule(code: string, cablePerMeter: number, plugPerPiece: number): Ke
 }
 
 function parseNum(s: string): number | null {
-  const n = parseFloat(s.replace(/,/g, ''));
+  const normalized = s
+    .replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
+    .replace(/[－−]/g, '-')
+    .replace(/,/g, '');
+  const n = parseFloat(normalized);
   return isNaN(n) ? null : n;
 }
