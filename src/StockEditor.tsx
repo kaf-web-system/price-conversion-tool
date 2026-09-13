@@ -505,7 +505,16 @@ function StockTableEditor({ db, table }: { db: StockDb; table: StockTable }) {
 
       {/* 一覧テーブル */}
       <div className="border border-gray-300 rounded overflow-auto">
-        <table className="w-full border-collapse text-[13px]">
+        <table className="w-full border-collapse text-[13px] table-fixed">
+          <colgroup>
+            <col className="w-[150px]" />
+            <col />
+            <col className="w-[180px]" />
+            <col className="w-[110px]" />
+            <col className="w-[120px]" />
+            <col className="w-[120px]" />
+            <col className="w-[120px]" />
+          </colgroup>
           <thead>
             <tr className="bg-gray-100">
               <th className="border border-gray-300 px-2.5 py-1.5 text-left font-semibold">SKU</th>
@@ -586,11 +595,11 @@ function StockTableEditor({ db, table }: { db: StockDb; table: StockTable }) {
                 </tr>
               ) : (
                 <tr key={row.id} className="border-t border-gray-200">
-                  <td className="px-2.5 py-1.5 align-middle">{row.sku}</td>
-                  <td className={`px-2.5 py-1.5 align-middle max-w-[320px] ${row.item_name ? 'text-black' : 'text-gray-300'}`} title={row.item_name ?? ''}>
+                  <td className="px-2.5 py-1.5 align-middle break-words">{row.sku}</td>
+                  <td className={`px-2.5 py-1.5 align-middle break-words ${row.item_name ? 'text-black' : 'text-gray-300'}`} title={row.item_name ?? ''}>
                     {row.item_name ?? '（未設定）'}
                   </td>
-                  <td className={`px-2.5 py-1.5 align-middle ${row.plug_name ? 'text-black' : 'text-gray-300'}`}>{row.plug_name ?? '（未設定）'}</td>
+                  <td className={`px-2.5 py-1.5 align-middle break-words ${row.plug_name ? 'text-black' : 'text-gray-300'}`}>{row.plug_name ?? '（未設定）'}</td>
                   <td className={`px-2.5 py-1.5 align-middle text-right ${row.current_price != null ? 'text-black' : 'text-gray-300'}`}>
                     {row.current_price != null ? row.current_price.toLocaleString() : '（未設定）'}
                   </td>
