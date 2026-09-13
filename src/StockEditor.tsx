@@ -100,6 +100,7 @@ function StockTableEditor({ db, table }: { db: StockDb; table: StockTable }) {
   const [page, setPage] = useState(1);
   const [sort, setSort] = useState<StockSortState>(DEFAULT_STOCK_SORT);
   const [unregisteredOnly, setUnregisteredOnly] = useState(false);
+  const [pinnedSortKeys, setPinnedSortKeys] = useState<Record<string, { sku: string; item_name: string | null; current_price: number | null }>>({});
 
   const notify = (msg: string) => {
     setSuccess(msg);
@@ -133,6 +134,7 @@ function StockTableEditor({ db, table }: { db: StockDb; table: StockTable }) {
   const loadData = useCallback(async (searchTerm: string) => {
     setLoading(true);
     setError(null);
+    setPinnedSortKeys({});
     try {
       const count = await fetchCount(searchTerm);
       setTotalCount(count);
@@ -236,6 +238,12 @@ function StockTableEditor({ db, table }: { db: StockDb; table: StockTable }) {
       });
       cancelEdit();
       notify('更新しました');
+      setPinnedSortKeys((prev) => {
+        if (prev[id]) return prev;
+        const oldRow = rows.find((r) => r.id === id);
+        if (!oldRow) return prev;
+        return { ...prev, [id]: { sku: oldRow.sku, item_name: oldRow.item_name, current_price: oldRow.current_price } };
+      });
       setRows((prev) => prev.map((r) => r.id === id ? { ...r, sku, item_name: item_name || null, plug_name: plug_name || null, current_price: priceNum, updated_at: now } : r));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -249,6 +257,11 @@ function StockTableEditor({ db, table }: { db: StockDb; table: StockTable }) {
       await apiFetch(`${table}?id=eq.${id}`, { method: 'DELETE', headers: { Prefer: '' } });
       notify('削除しました');
       setRows((prev) => prev.filter((r) => r.id !== id));
+      setPinnedSortKeys((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
       setTotalCount((prev) => Math.max(0, prev - 1));
       setLoadedCount((prev) => Math.max(0, prev - 1));
     } catch (e) {
@@ -338,10 +351,20 @@ function StockTableEditor({ db, table }: { db: StockDb; table: StockTable }) {
   };
 
   // 列タイトルクリック: 同じ列は昇順⇔降順トグル、別の列はその列の昇順（片方は解除）
-  const handleSortClick = (key: StockSortKey) => setSort((s) => nextStockSort(s, key));
+  const handleSortClick = (key: StockSortKey) => {
+    setPinnedSortKeys({});
+    setSort((s) => nextStockSort(s, key));
+  };
 
-  // 読み込み済み行を表示用に安定ソート（日本語商品名は localeCompare('ja')）
-  const sortedRows = useMemo(() => sortStockRows(rows, sort), [rows, sort]);
+  const sortedRows = useMemo(() => {
+    const sortProxy = rows.map((r) => {
+      const pin = pinnedSortKeys[r.id];
+      return pin ? { ...r, ...pin } : r;
+    });
+    const ordered = sortStockRows(sortProxy, sort);
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    return ordered.map((r) => byId.get(r.id)!);
+  }, [rows, sort, pinnedSortKeys]);
 
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
