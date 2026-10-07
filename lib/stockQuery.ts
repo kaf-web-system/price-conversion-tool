@@ -8,7 +8,8 @@ import type { StockSortState } from './stockSort';
  */
 export type StockTable = 'stock' | 'stock_shopify';
 
-const STOCK_SELECT = 'select=id,sku,item_name,plug_name,current_price,updated_at,created_at';
+const STOCK_SELECT_BASE = 'select=id,sku,item_name,plug_name,current_price,updated_at,created_at';
+const STOCK_SELECT_AMAZON = 'select=id,sku,item_name,plug_name,current_price,labor_costs,updated_at,created_at';
 
 const PLUG_UNREGISTERED_FILTER = 'or=(plug_name.is.null,plug_name.eq.)';
 
@@ -26,7 +27,8 @@ export function buildStockQueryPath(
   sortState: StockSortState,
   unregisteredOnly = false,
 ): string {
-  const select = `${STOCK_SELECT}&${buildStockOrder(sortState)}`;
+  const stockSelect = table === 'stock' ? STOCK_SELECT_AMAZON : STOCK_SELECT_BASE;
+  const select = `${stockSelect}&${buildStockOrder(sortState)}`;
   if (!searchTerm.trim()) {
     return unregisteredOnly
       ? `${table}?${select}&${PLUG_UNREGISTERED_FILTER}`
