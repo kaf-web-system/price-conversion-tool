@@ -6,6 +6,8 @@ import type { AmazonRow, CalcResult, KeywordRule } from '../lib/parser';
 import { parseRulesTxt } from '../lib/ruleParser';
 import StockEditor from './StockEditor';
 import ShopifyTool from './ShopifyTool';
+import { supabase } from '../lib/supabase';
+import { getAuthHeaders } from '../lib/authHeaders';
 
 type Tab = 'price' | 'stock';
 type Platform = 'amazon' | 'shopify';
@@ -56,7 +58,12 @@ export default function App() {
   const [ruleLoadMsg, setRuleLoadMsg] = useState<string | null>(null);
   const [inventoryMsg, setInventoryMsg] = useState<string | null>(null);
   const [rulesCollapsed, setRulesCollapsed] = useState(true);
+  const [userEmail, setUserEmail] = useState('');
   const ruleFileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    supabase.auth.getUser().then((r) => setUserEmail(r.data.user?.email ?? ''));
+  }, []);
 
   useEffect(() => {
     try { localStorage.setItem(LS_RULES_KEY, JSON.stringify(rules)); } catch { /* ignore */ }
@@ -151,12 +158,16 @@ export default function App() {
       let inventoryFetchFailed = false;
       try {
         const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
-        const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
-        if (supabaseUrl && supabaseKey) {
+        if (supabaseUrl) {
+          const authHeaders = await getAuthHeaders();
           const resp = await fetch(
             `${supabaseUrl}/rest/v1/stock?select=sku,plug_name`,
-            { headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` } }
+            { headers: authHeaders }
           );
+          if (resp.status === 401) {
+            await supabase.auth.signOut();
+            throw new Error('セッションの有効期限が切れました。再度ログインしてください。');
+          }
           if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
           const dbRows: { sku: string; plug_name: string | null }[] = await resp.json();
           inventoryDbCount = dbRows.length;
@@ -335,6 +346,16 @@ export default function App() {
 
   return (
     <main className="max-w-[1100px] mx-auto p-6 font-sans bg-white text-black min-h-screen">
+      {/* ログアウト */}
+      <div className="flex justify-end items-center gap-3 mb-2">
+        <span className="text-xs text-gray-500">{userEmail}</span>
+        <button
+          onClick={() => supabase.auth.signOut()}
+          className="px-3 py-1 text-xs text-gray-600 border border-gray-300 rounded bg-white cursor-pointer hover:bg-gray-50"
+        >
+          ログアウト
+        </button>
+      </div>
       {/* タブバー */}
       <div className="flex border-b-2 border-gray-300 mb-5">
         {([

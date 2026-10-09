@@ -8,6 +8,8 @@ import type { StockTable } from '../lib/stockQuery';
 import { DEFAULT_STOCK_SORT, nextStockSort, sortStockRows } from '../lib/stockSort';
 import type { StockSortKey, StockSortState } from '../lib/stockSort';
 import type { AmazonRow } from '../lib/parser';
+import { supabase } from '../lib/supabase';
+import { getAuthHeaders } from '../lib/authHeaders';
 
 type StockRow = {
   id: string;
@@ -23,17 +25,20 @@ type StockRow = {
 type DraftRow = { sku: string; item_name: string; plug_name: string; current_price: string; labor_costs: string };
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
-const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
-
-const headers = {
-  'Content-Type': 'application/json',
-  apikey: supabaseKey,
-  Authorization: `Bearer ${supabaseKey}`,
-  Prefer: 'return=representation',
-};
 
 async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
-  const resp = await fetch(`${supabaseUrl}/rest/v1/${path}`, { ...init, headers: { ...headers, ...init?.headers } });
+  const authHeaders = await getAuthHeaders();
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Prefer: 'return=representation',
+    ...authHeaders,
+    ...init?.headers as Record<string, string>,
+  };
+  const resp = await fetch(`${supabaseUrl}/rest/v1/${path}`, { ...init, headers });
+  if (resp.status === 401) {
+    await supabase.auth.signOut();
+    throw new Error('セッションの有効期限が切れました。再度ログインしてください。');
+  }
   if (!resp.ok) {
     const text = await resp.text();
     throw new Error(`HTTP ${resp.status}: ${text}`);

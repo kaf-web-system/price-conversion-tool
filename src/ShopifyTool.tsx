@@ -4,6 +4,8 @@ import type { ShopifyParseResult, ShopifyRow } from '../lib/shopifyParser';
 import { calculatePrice } from '../lib/parser';
 import type { AmazonRow, CalcResult, KeywordRule } from '../lib/parser';
 import { serializeCsv } from '../lib/csvSerializer';
+import { supabase } from '../lib/supabase';
+import { getAuthHeaders } from '../lib/authHeaders';
 
 type ShopifyResult = CalcResult & { handle: string; originalTitle: string; rowIndex: number };
 
@@ -13,7 +15,6 @@ interface Props {
 }
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
-const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 
 function csvEsc(s: string): string {
   if (s == null) return '';
@@ -81,10 +82,15 @@ export default function ShopifyTool({ rules, rulesSection }: Props) {
       let inventoryDbCount = 0;
       let inventoryFetchFailed = false;
       try {
-        if (supabaseUrl && supabaseKey) {
+        if (supabaseUrl) {
+          const authHeaders = await getAuthHeaders();
           const resp = await fetch(`${supabaseUrl}/rest/v1/stock?select=sku,plug_name`, {
-            headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` },
+            headers: authHeaders,
           });
+          if (resp.status === 401) {
+            await supabase.auth.signOut();
+            throw new Error('セッションの有効期限が切れました。再度ログインしてください。');
+          }
           if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
           const dbRows: { sku: string; plug_name: string | null }[] = await resp.json();
           inventoryDbCount = dbRows.length;
