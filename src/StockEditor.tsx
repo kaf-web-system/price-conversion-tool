@@ -15,11 +15,12 @@ type StockRow = {
   item_name: string | null;
   plug_name: string | null;
   current_price: number | null;
+  labor_costs?: number | null;
   updated_at: string;
   created_at: string;
 };
 
-type DraftRow = { sku: string; item_name: string; plug_name: string; current_price: string };
+type DraftRow = { sku: string; item_name: string; plug_name: string; current_price: string; labor_costs: string };
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
@@ -40,7 +41,7 @@ async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
   return resp;
 }
 
-const EMPTY_DRAFT: DraftRow = { sku: '', item_name: '', plug_name: '', current_price: '' };
+const EMPTY_DRAFT: DraftRow = { sku: '', item_name: '', plug_name: '', current_price: '', labor_costs: '' };
 const PAGE_SIZE = 100;
 const CHUNK_SIZE = 1000;
 
@@ -190,12 +191,19 @@ function StockTableEditor({ db, table }: { db: StockDb; table: StockTable }) {
     if (!sku) { setError('SKU は必須です'); return; }
     const priceNum = draft.current_price.trim() === '' ? null : parseInt(draft.current_price.replace(/,/g, ''), 10);
     if (priceNum !== null && isNaN(priceNum)) { setError('現在価格が数値として読み取れません'); return; }
+    let laborNum: number | null = null;
+    if (db === 'amazon') {
+      laborNum = draft.labor_costs.trim() === '' ? null : parseInt(draft.labor_costs.replace(/,/g, ''), 10);
+      if (laborNum !== null && isNaN(laborNum)) { setError('工賃が数値として読み取れません'); return; }
+    }
     setError(null);
     try {
+      const body: Record<string, unknown> = { sku, item_name: item_name || null, plug_name: plug_name || null, current_price: priceNum, updated_at: new Date().toISOString() };
+      if (db === 'amazon') body.labor_costs = laborNum;
       const resp = await apiFetch(`${table}?on_conflict=sku`, {
         method: 'POST',
         headers: { Prefer: 'return=representation,resolution=merge-duplicates' },
-        body: JSON.stringify({ sku, item_name: item_name || null, plug_name: plug_name || null, current_price: priceNum, updated_at: new Date().toISOString() }),
+        body: JSON.stringify(body),
       });
       const inserted = await resp.json() as StockRow[];
       setDraft(EMPTY_DRAFT);
@@ -217,7 +225,7 @@ function StockTableEditor({ db, table }: { db: StockDb; table: StockTable }) {
 
   const startEdit = (row: StockRow) => {
     setEditId(row.id);
-    setEditDraft({ sku: row.sku, item_name: row.item_name ?? '', plug_name: row.plug_name ?? '', current_price: row.current_price != null ? String(row.current_price) : '' });
+    setEditDraft({ sku: row.sku, item_name: row.item_name ?? '', plug_name: row.plug_name ?? '', current_price: row.current_price != null ? String(row.current_price) : '', labor_costs: row.labor_costs != null ? String(row.labor_costs) : '' });
   };
 
   const cancelEdit = () => { setEditId(null); setEditDraft(EMPTY_DRAFT); };
@@ -229,12 +237,19 @@ function StockTableEditor({ db, table }: { db: StockDb; table: StockTable }) {
     if (!sku) { setError('SKU は必須です'); return; }
     const priceNum = editDraft.current_price.trim() === '' ? null : parseInt(editDraft.current_price.replace(/,/g, ''), 10);
     if (priceNum !== null && isNaN(priceNum)) { setError('現在価格が数値として読み取れません'); return; }
+    let laborNum: number | null = null;
+    if (db === 'amazon') {
+      laborNum = editDraft.labor_costs.trim() === '' ? null : parseInt(editDraft.labor_costs.replace(/,/g, ''), 10);
+      if (laborNum !== null && isNaN(laborNum)) { setError('工賃が数値として読み取れません'); return; }
+    }
     setError(null);
     try {
       const now = new Date().toISOString();
+      const patchBody: Record<string, unknown> = { sku, item_name: item_name || null, plug_name: plug_name || null, current_price: priceNum, updated_at: now };
+      if (db === 'amazon') patchBody.labor_costs = laborNum;
       await apiFetch(`${table}?id=eq.${id}`, {
         method: 'PATCH',
-        body: JSON.stringify({ sku, item_name: item_name || null, plug_name: plug_name || null, current_price: priceNum, updated_at: now }),
+        body: JSON.stringify(patchBody),
       });
       cancelEdit();
       notify('更新しました');
@@ -244,7 +259,7 @@ function StockTableEditor({ db, table }: { db: StockDb; table: StockTable }) {
         if (!oldRow) return prev;
         return { ...prev, [id]: { sku: oldRow.sku, item_name: oldRow.item_name, current_price: oldRow.current_price } };
       });
-      setRows((prev) => prev.map((r) => r.id === id ? { ...r, sku, item_name: item_name || null, plug_name: plug_name || null, current_price: priceNum, updated_at: now } : r));
+      setRows((prev) => prev.map((r) => r.id === id ? { ...r, sku, item_name: item_name || null, plug_name: plug_name || null, current_price: priceNum, ...(db === 'amazon' ? { labor_costs: laborNum } : {}), updated_at: now } : r));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -390,7 +405,7 @@ function StockTableEditor({ db, table }: { db: StockDb; table: StockTable }) {
     <div>
       <h2 className="mt-0">{db === 'shopify' ? 'Shopify在庫DB（stock_shopify）編集' : 'Amazon在庫DB（stock）編集'}</h2>
       <p className="text-gray-600 text-[13px] mb-4">
-        SKU と 商品名（item_name）、プラグ型番（plug_name）、現在価格（current_price）の対応を管理します。
+        SKU と 商品名（item_name）、プラグ型番（plug_name）、現在価格（current_price）{db === 'amazon' && '、工賃（labor_costs）'}の対応を管理します。
         ここで登録した plug_name が価格改定ツールのプラグ判定に使われます。
         {db === 'shopify' && (
           <>
@@ -495,6 +510,15 @@ function StockTableEditor({ db, table }: { db: StockDb; table: StockTable }) {
             onKeyDown={(e) => { if (e.key === 'Enter') handleAdd(); }}
             className="px-2 py-1 border border-gray-400 rounded text-[13px] bg-white text-black min-w-[120px] box-border"
           />
+          {db === 'amazon' && (
+            <input
+              placeholder="工賃（円）"
+              value={draft.labor_costs}
+              onChange={(e) => setDraft((d) => ({ ...d, labor_costs: e.target.value }))}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleAdd(); }}
+              className="px-2 py-1 border border-gray-400 rounded text-[13px] bg-white text-black min-w-[100px] box-border"
+            />
+          )}
           <button onClick={handleAdd} className="px-4 py-1.5 bg-[#0070f3] text-white border-0 rounded cursor-pointer text-[13px]">追加</button>
         </div>
       </div>
@@ -530,10 +554,11 @@ function StockTableEditor({ db, table }: { db: StockDb; table: StockTable }) {
       <div className="border border-gray-300 rounded overflow-auto">
         <table className="w-full border-collapse text-[13px] table-fixed">
           <colgroup>
-            <col className="w-[150px]" />
+            <col className={db === 'amazon' ? 'w-[130px]' : 'w-[150px]'} />
             <col />
-            <col className="w-[180px]" />
+            <col className={db === 'amazon' ? 'w-[160px]' : 'w-[180px]'} />
             <col className="w-[110px]" />
+            {db === 'amazon' && <col className="w-[80px]" />}
             <col className="w-[120px]" />
             <col className="w-[120px]" />
             <col className="w-[120px]" />
@@ -566,6 +591,9 @@ function StockTableEditor({ db, table }: { db: StockDb; table: StockTable }) {
                   </span>
                 </button>
               </th>
+              {db === 'amazon' && (
+                <th className="border border-gray-300 px-2.5 py-1.5 text-right font-semibold">工賃</th>
+              )}
               <th className="border border-gray-300 px-2.5 py-1.5 text-left font-semibold">更新日時</th>
               <th className="border border-gray-300 px-2.5 py-1.5 text-left font-semibold">登録日時</th>
               <th className="border border-gray-300 px-2.5 py-1.5 text-left font-semibold w-[120px]">操作</th>
@@ -573,10 +601,10 @@ function StockTableEditor({ db, table }: { db: StockDb; table: StockTable }) {
           </thead>
           <tbody>
             {loading && (
-              <tr><td colSpan={7} className="p-4 text-center text-gray-500">読み込み中...</td></tr>
+              <tr><td colSpan={db === 'amazon' ? 8 : 7} className="p-4 text-center text-gray-500">読み込み中...</td></tr>
             )}
             {!loading && totalCount === 0 && (
-              <tr><td colSpan={7} className="p-4 text-center text-gray-500">データがありません</td></tr>
+              <tr><td colSpan={db === 'amazon' ? 8 : 7} className="p-4 text-center text-gray-500">データがありません</td></tr>
             )}
             {pageRows.map((row) =>
               editId === row.id ? (
@@ -609,6 +637,15 @@ function StockTableEditor({ db, table }: { db: StockDb; table: StockTable }) {
                       className="px-2 py-1 border border-gray-400 rounded text-[13px] bg-white text-black w-full box-border text-right"
                     />
                   </td>
+                  {db === 'amazon' && (
+                    <td className="px-2.5 py-1.5 align-middle">
+                      <input
+                        value={editDraft.labor_costs}
+                        onChange={(e) => setEditDraft((d) => ({ ...d, labor_costs: e.target.value }))}
+                        className="px-2 py-1 border border-gray-400 rounded text-[13px] bg-white text-black w-full box-border text-right"
+                      />
+                    </td>
+                  )}
                   <td className="px-2.5 py-1.5 align-middle text-gray-400 text-[11px]">{formatDate(row.updated_at)}</td>
                   <td className="px-2.5 py-1.5 align-middle text-gray-300 text-[11px]">{formatDate(row.created_at)}</td>
                   <td className="px-2.5 py-1.5 align-middle">
@@ -626,6 +663,11 @@ function StockTableEditor({ db, table }: { db: StockDb; table: StockTable }) {
                   <td className={`px-2.5 py-1.5 align-middle text-right ${row.current_price != null ? 'text-black' : 'text-gray-300'}`}>
                     {row.current_price != null ? row.current_price.toLocaleString() : '（未設定）'}
                   </td>
+                  {db === 'amazon' && (
+                    <td className={`px-2.5 py-1.5 align-middle text-right ${row.labor_costs != null ? 'text-black' : 'text-gray-300'}`}>
+                      {row.labor_costs != null ? row.labor_costs.toLocaleString() : '（未設定）'}
+                    </td>
+                  )}
                   <td className="px-2.5 py-1.5 align-middle text-gray-500 text-[11px]">{formatDate(row.updated_at)}</td>
                   <td className="px-2.5 py-1.5 align-middle text-gray-500 text-[11px]">{formatDate(row.created_at)}</td>
                   <td className="px-2.5 py-1.5 align-middle">
@@ -636,7 +678,7 @@ function StockTableEditor({ db, table }: { db: StockDb; table: StockTable }) {
               )
             )}
             {fetchingMore && (
-              <tr><td colSpan={7} className="p-2 text-center text-gray-400 text-[12px]">追加データを読み込み中...</td></tr>
+              <tr><td colSpan={db === 'amazon' ? 8 : 7} className="p-2 text-center text-gray-400 text-[12px]">追加データを読み込み中...</td></tr>
             )}
           </tbody>
         </table>
